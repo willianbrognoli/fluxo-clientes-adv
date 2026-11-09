@@ -355,6 +355,10 @@ function integrar(itens) {
       if (!nome || p.partes.some((x) => x.nome === nome)) continue;
       p.partes.push({ nome, polo: d.polo || '', advogada: nome.toUpperCase() === adv });
     }
+    // "Parte assistida: NOME" / "Assistido(a): NOME" no texto da intimação = cliente
+    const limpo = String(it.texto || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    const ma = limpo.match(/(?:partes?\s*(?:\(s\))?\s+)?assistid[oa]s?\s*(?:\([oa]?s?\))?\s*[:\-–]\s*([A-ZÀ-Ý][A-Za-zÀ-ÿ'.\- ]{3,80}?)(?=\s*(?:[,;(]|\bCPF\b|\bCNPJ\b|\s-\s|$))/i);
+    if (ma && !/^(por|pel[oa]|defesa|advogad)/i.test(ma[1])) p.assistida = ma[1].trim();
     if (!p.intimacoes.some((x) => x.id === it.id)) {
       p.intimacoes.push({
         id: it.id,
@@ -369,7 +373,10 @@ function integrar(itens) {
     p.intimacoes = p.intimacoes.slice(0, 40);
     p.ultimaData = p.intimacoes[0] ? p.intimacoes[0].data : '';
     const candidato = p.partes.find((x) => !x.advogada && !/^SIGILO$|MINIST[EÉ]RIO P[UÚ]BLICO|ESTADO D[OE] |MUNIC[IÍ]PIO D[EO] /i.test(x.nome));
-    p.sugestaoCliente = candidato ? candidato.nome : (p.partes.some((x) => x.nome === 'SIGILO') ? 'Processo em sigilo' : '');
+    if (p.assistida && !p.partes.some((x) => x.nome.toUpperCase() === p.assistida.toUpperCase())) {
+      p.partes.unshift({ nome: p.assistida, polo: 'S', advogada: false });
+    }
+    p.sugestaoCliente = p.assistida || (candidato ? candidato.nome : (p.partes.some((x) => x.nome === 'SIGILO') ? 'Processo em sigilo' : ''));
     db.processos[num] = p;
   }
   // distribuir: quadro, descartados ou encontrados

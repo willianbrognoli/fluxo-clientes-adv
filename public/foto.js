@@ -72,6 +72,7 @@
   }
 
   const ROTULOS = [
+    { campo: 'assistida', re: /^(partes?\s*\(?s?\)?\s+assistid[oa]s?\s*\(?s?\)?|assistid[oa]s?\s*\(?[oa]?s?\)?)(?=[\s:;\-–]|$)/i },
     { campo: 'classe', re: /^(classe(\s+(processual|judicial))?|tipo\s+de\s+a[çc][ãa]o)\b/i },
     { campo: 'assunto', re: /^assunto(s)?(\s+principal)?\b/i },
     { campo: 'orgao', re: /^(vara|ju[ií]zo|[óo]rg[ãa]o(\s+julgador)?|serventia|unidade(\s+judici[áa]ria)?|secretaria)\b/i },
@@ -81,26 +82,31 @@
     { campo: 'valor', re: /^valor(\s+da\s+causa)?\b/i }
   ];
 
-  const limpar = (s) => String(s || '')
+  // corta no fim da "coluna": 2+ espaços, tabulação ou o próximo rótulo (Prazo:, Data:, ...)
+  const cortar = (s) => String(s || '').split(/\s{2,}|\t|\s(?=(?:prazo|data|evento|processo|classe|vara|autor|r[ée]u|advogad|situa[çc])\w*\s*:)/i)[0];
+  const limpar = (s) => cortar(String(s || '').replace(/^[\s:;.\-–—|]+/, ''))
     .replace(/\s+/g, ' ')
     .replace(/^[\s:;.\-–—|]+/, '')
     .replace(/\s*\(?\s*(cpf|cnpj|rg|oab)\b.*$/i, '')
     .replace(/[|_]+/g, '')
     .trim();
-  const pareceRotulo = (l) => ROTULOS.some((r) => r.re.test(l)) || /^(advogad|procurador|n[úu]mero|processo|data|distribu|juiz|magistrad|situa[çc][ãa]o|prioridade|segredo)/i.test(l);
+  const pareceRotulo = (l) => ROTULOS.some((r) => r.re.test(l)) || /^(advogad|procurador|n[úu]mero|processo|data|distribu|juiz|magistrad|situa[çc][ãa]o|prioridade|segredo|prazo|evento|movimenta)/i.test(l);
 
   function extrair(texto) {
     const linhas = texto.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    const out = { numero: acharCNJ(texto), classe: '', assunto: '', orgao: '', comarca: '', valor: '', ativo: [], passivo: [] };
+    const out = { numero: acharCNJ(texto), classe: '', assunto: '', orgao: '', comarca: '', valor: '', assistida: [], ativo: [], passivo: [] };
     for (let i = 0; i < linhas.length; i++) {
-      const l = linhas[i];
+      let l = linhas[i];
+      // "Parte assistida" pode vir no meio da linha (tabelas do Projudi): começa a leitura dali
+      const meio = l.search(/partes?\s*\(?s?\)?\s+assistid/i);
+      if (meio > 0) l = l.slice(meio);
       for (const { campo, re } of ROTULOS) {
         const m = l.match(re);
         if (!m) continue;
         let valor = limpar(l.slice(m[0].length));
         if (!valor && linhas[i + 1] && !pareceRotulo(linhas[i + 1])) valor = limpar(linhas[i + 1]);
         if (!valor || valor.length < 3) break;
-        if (campo === 'ativo' || campo === 'passivo') {
+        if (campo === 'ativo' || campo === 'passivo' || campo === 'assistida') {
           valor.split(/\s+e\s+(?=[A-ZÀ-Ú])|;/).map(limpar).filter((v) => v.length >= 3).forEach((v) => {
             if (!out[campo].includes(v)) out[campo].push(v);
           });

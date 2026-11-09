@@ -30,7 +30,7 @@
     if (h < 24) return `há ${h} h`;
     return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   };
-  const POLO = { A: 'polo ativo', P: 'polo passivo', T: 'terceiro' };
+  const POLO = { A: 'polo ativo', P: 'polo passivo', T: 'terceiro', S: 'parte assistida' };
 
   const ICON = {
     check: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
@@ -151,7 +151,7 @@
     nomeClasse: it.nomeClasse,
     numero_processo: it.numero_processo,
     link: it.link,
-    texto: String(it.texto || '').slice(0, 1200),
+    texto: String(it.texto || '').slice(0, 4000),
     destinatarios: (it.destinatarios || []).map((d) => ({ nome: d.nome, polo: d.polo })),
     destinatarioadvogados: (it.destinatarioadvogados || []).map((a) => ({ advogado: a.advogado && { nome: a.advogado.nome, numero_oab: a.advogado.numero_oab } }))
   });
@@ -511,7 +511,13 @@
         if (preencher('orgao', c.orgao)) achados.push('vara');
         if (preencher('classe', c.classe)) achados.push('classe');
         if (c.valor && !form.notas.value) form.notas.value = `Valor da causa: ${c.valor}`;
-        let partes = [...c.ativo.map((n) => ({ nome: n, polo: 'polo ativo' })), ...c.passivo.map((n) => ({ nome: n, polo: 'polo passivo' }))];
+        // a parte assistida é o cliente: tem prioridade sobre qualquer outro nome
+        if (c.assistida[0]) { form.cliente.value = titulo(c.assistida[0]); achados.push('cliente (parte assistida)'); }
+        let partes = [
+          ...c.assistida.map((n) => ({ nome: n, polo: 'parte assistida' })),
+          ...c.ativo.filter((n) => !c.assistida.includes(n)).map((n) => ({ nome: n, polo: 'polo ativo' })),
+          ...c.passivo.filter((n) => !c.assistida.includes(n)).map((n) => ({ nome: n, polo: 'polo passivo' }))
+        ];
         // completa com o que a busca da OAB já sabe sobre esse processo
         if (c.numero) {
           const conhecido = await api('GET', `/api/processo/${dig(c.numero)}`).catch(() => null);
