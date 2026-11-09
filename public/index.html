@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141619" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Fluxo de Clientes</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon.svg">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <a class="pular" href="#conteudo">Pular para o conteúdo</a>
+
+  <!-- Login -->
+  <main id="tela-login" class="login" hidden>
+    <form id="form-login" class="login-caixa" autocomplete="on">
+      <img src="/icon.svg" alt="" width="48" height="48">
+      <h1>Fluxo de Clientes</h1>
+      <p class="sutil">Entre para ver seus processos.</p>
+      <label>Usuário
+        <input name="usuario" autocomplete="username" required autocapitalize="none" spellcheck="false">
+      </label>
+      <label>Senha
+        <input name="senha" type="password" autocomplete="current-password" required>
+      </label>
+      <p id="login-erro" class="erro" role="alert"></p>
+      <button class="btn primario grande" type="submit">Entrar</button>
+    </form>
+  </main>
+
+  <!-- App -->
+  <div id="tela-app" hidden>
+    <header class="topo">
+      <div class="marca">
+        <img src="/icon.svg" alt="" width="28" height="28">
+        <div>
+          <strong>Fluxo de Clientes</strong>
+          <span id="oab-rotulo" class="sutil"></span>
+        </div>
+      </div>
+      <nav class="abas" aria-label="Seções">
+        <button class="aba" data-vista="quadro" aria-current="page">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1.5"/><rect x="10" y="4" width="5" height="11" rx="1.5"/><rect x="17" y="4" width="4" height="7" rx="1.5"/></svg>
+          <span>Quadro</span>
+        </button>
+        <button class="aba" data-vista="encontrados">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 13h4l2 3h4l2-3h4"/><path d="M5.5 5h13L21 13v6H3v-6z"/></svg>
+          <span>Encontrados</span><b id="cont-encontrados" class="contador" hidden></b>
+        </button>
+        <button class="aba" data-vista="etapas">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 6h10M4 12h16M4 18h7"/><circle cx="17" cy="6" r="2"/><circle cx="14" cy="18" r="2"/></svg>
+          <span>Etapas</span>
+        </button>
+        <button class="aba" data-vista="mais">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+          <span>Mais</span>
+        </button>
+      </nav>
+      <div class="topo-acoes">
+        <button id="btn-sync" class="btn icone" title="Buscar intimações agora" aria-label="Buscar intimações agora">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
+        </button>
+        <button class="btn primario so-desktop" data-acao="novo">+ Novo processo</button>
+      </div>
+    </header>
+
+    <main id="conteudo" tabindex="-1">
+      <!-- Quadro -->
+      <section id="vista-quadro" class="vista">
+        <div class="barra-quadro">
+          <label class="busca">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="busca" type="search" placeholder="Buscar cliente ou nº do processo" aria-label="Buscar cliente ou número do processo" autocomplete="off">
+          </label>
+        </div>
+        <div id="chips" class="chips" role="group" aria-label="Escolher etapa"></div>
+        <div id="quadro" class="quadro"></div>
+      </section>
+
+      <!-- Encontrados -->
+      <section id="vista-encontrados" class="vista" hidden>
+        <div class="cabeca-vista">
+          <h2>Encontrados na OAB</h2>
+          <p class="sutil" id="info-sync"></p>
+        </div>
+        <div id="lista-encontrados" class="lista"></div>
+      </section>
+
+      <!-- Etapas -->
+      <section id="vista-etapas" class="vista estreita" hidden>
+        <div class="cabeca-vista">
+          <h2>Etapas</h2>
+          <p class="sutil">Toque no nome para renomear. Use as setas para mudar a ordem.</p>
+        </div>
+        <ol id="lista-etapas" class="lista-etapas"></ol>
+        <form id="form-etapa" class="linha-add">
+          <input name="nome" placeholder="Nova etapa" aria-label="Nome da nova etapa" maxlength="60" required>
+          <button class="btn primario" type="submit">Adicionar</button>
+        </form>
+      </section>
+
+      <!-- Mais -->
+      <section id="vista-mais" class="vista estreita" hidden>
+        <div class="cabeca-vista"><h2>Mais</h2></div>
+        <div class="painel">
+          <h3>Busca automática</h3>
+          <p class="sutil" id="info-sync-2"></p>
+          <button class="btn" data-acao="sync">Buscar intimações agora</button>
+        </div>
+        <div class="painel">
+          <h3>Descartados</h3>
+          <p class="sutil">Processos da OAB que você retirou. Eles não voltam sozinhos; restaure se precisar.</p>
+          <div id="lista-descartados" class="lista compacta"></div>
+        </div>
+        <div class="painel">
+          <button class="btn perigo-texto" data-acao="sair">Sair</button>
+        </div>
+      </section>
+    </main>
+
+    <button class="fab so-mobile" data-acao="novo" aria-label="Novo processo">
+      <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+  </div>
+
+  <!-- Detalhe / novo -->
+  <dialog id="dlg" class="folha" aria-labelledby="dlg-titulo">
+    <form id="form-cartao" method="dialog">
+      <header class="folha-topo">
+        <span class="alca" aria-hidden="true"></span>
+        <h2 id="dlg-titulo">Processo</h2>
+        <button type="button" class="btn icone" data-fechar aria-label="Fechar">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+      <div class="folha-corpo" id="dlg-corpo"></div>
+      <footer class="folha-rodape" id="dlg-rodape"></footer>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

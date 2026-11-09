@@ -1,0 +1,18 @@
+{
+  "name": "fluxo-clientes-adv",
+  "version": "1.0.0",
+  "description": "Quadro de etapas de clientes/processos para advocacia, com importação automática pela OAB (DJEN/CNJ).",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
