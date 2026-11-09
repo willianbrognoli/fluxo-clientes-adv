@@ -267,17 +267,43 @@
     return out.length ? `<span class="cartao-selos">${out.join('')}</span>` : '';
   }
 
+  // Data sempre dd/mm/aaaa e hora hh:mm (24h), independente do idioma do aparelho
+  const campoData = (attrs) => `<input ${attrs} type="text" inputmode="numeric" placeholder="dd/mm/aaaa" maxlength="10" data-mask="data" autocomplete="off">`;
+  const campoHora = (attrs) => `<input ${attrs} type="text" inputmode="numeric" placeholder="hh:mm" maxlength="5" data-mask="hora" autocomplete="off">`;
+  function brParaISO(s) {
+    const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (!m) return '';
+    const [d, mo, a] = [+m[1], +m[2], +m[3]];
+    const dt = new Date(a, mo - 1, d);
+    if (a < 2000 || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return '';
+    return `${a}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  const horaValida = (s) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(s || '').trim());
+  document.addEventListener('input', (ev) => {
+    const el = ev.target;
+    if (!el.dataset || !el.dataset.mask) return;
+    const d = el.value.replace(/\D/g, '');
+    if (el.dataset.mask === 'data') {
+      const x = d.slice(0, 8);
+      el.value = x.length > 4 ? `${x.slice(0, 2)}/${x.slice(2, 4)}/${x.slice(4)}` : x.length > 2 ? `${x.slice(0, 2)}/${x.slice(2)}` : x;
+    } else {
+      const x = d.slice(0, 4);
+      el.value = x.length > 2 ? `${x.slice(0, 2)}:${x.slice(2)}` : x;
+    }
+  });
+
   function formAudHTML(prefixo) {
     return `<div class="linha-aud">
-      <label>Data<input type="date" id="${prefixo}-data"></label>
-      <label>Hora<input type="time" id="${prefixo}-hora"></label>
+      <label>Data${campoData(`id="${prefixo}-data"`)}</label>
+      <label>Hora${campoHora(`id="${prefixo}-hora"`)}</label>
       <label class="largo">Tipo (opcional)<input id="${prefixo}-tipo" placeholder="Ex.: instrução e julgamento" autocomplete="off"></label>
     </div>`;
   }
   async function salvarAud(id, prefixo) {
-    const data = $(`#${prefixo}-data`).value;
-    if (!data) { toast('Escolha a data da audiência'); $(`#${prefixo}-data`).focus(); return false; }
-    const hora = $(`#${prefixo}-hora`).value;
+    const data = brParaISO($(`#${prefixo}-data`).value);
+    if (!data) { toast('Digite a data no formato dd/mm/aaaa'); $(`#${prefixo}-data`).focus(); return false; }
+    const hora = $(`#${prefixo}-hora`).value.trim();
+    if (hora && !horaValida(hora)) { toast('Digite a hora no formato hh:mm (ex.: 14:30)'); $(`#${prefixo}-hora`).focus(); return false; }
     const t = $(`#${prefixo}-tipo`).value.trim();
     await acao('POST', `/api/cartoes/${id}/audiencias`, { data, hora, tipo: t ? (/^audi/i.test(t) ? t : 'Audiência de ' + t.replace(/^de\s+/i, '')) : 'Audiência' });
     toast(`Audiência salva: ${dataBR(data)}${hora ? ' às ' + hora : ''}`);
@@ -638,7 +664,7 @@
         if (preencher('classe', c.classe)) achados.push('classe');
         if (preencher('telefone', c.telefone)) achados.push('telefone');
         if (c.audiencia && form.audData && !form.audData.value) {
-          form.audData.value = c.audiencia.data;
+          form.audData.value = dataBR(c.audiencia.data);
           if (c.audiencia.hora) form.audHora.value = c.audiencia.hora;
           achados.push('data da audiência');
         }
@@ -691,8 +717,8 @@
       ${campos({ etapaId: vista === 'quadro' ? etapaAtiva : S.etapas[0].id })}
       <p class="secao-titulo">Audiência (opcional)</p>
       <div class="linha-aud">
-        <label>Data<input type="date" name="audData"></label>
-        <label>Hora<input type="time" name="audHora"></label>
+        <label>Data${campoData('name="audData"')}</label>
+        <label>Hora${campoHora('name="audHora"')}</label>
         <label class="largo">Tipo<input name="audTipo" placeholder="Ex.: instrução e julgamento" autocomplete="off"></label>
       </div>`;
     $('#dlg-rodape').innerHTML = `<button type="button" class="btn fantasma" data-fechar>Cancelar</button><button type="submit" class="btn primario">Adicionar</button>`;
@@ -701,6 +727,12 @@
     form.onsubmit = async (ev) => {
       ev.preventDefault();
       const dados = Object.fromEntries(new FormData(form));
+      if (dados.audData) {
+        const iso = brParaISO(dados.audData);
+        if (!iso) { toast('Data da audiência: use dd/mm/aaaa'); form.audData.focus(); return; }
+        if (dados.audHora && !horaValida(dados.audHora)) { toast('Hora da audiência: use hh:mm (ex.: 14:30)'); form.audHora.focus(); return; }
+        dados.audData = iso;
+      }
       try {
         await acao('POST', '/api/cartoes', dados);
         dlg.close();
