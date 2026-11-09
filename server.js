@@ -117,7 +117,8 @@ app.post('/api/login', (req, res) => {
     return res.status(429).json({ erro: 'Muitas tentativas. Aguarde alguns minutos.' });
   }
   const { usuario, senha } = req.body || {};
-  const ok = APP_PASSWORD && igualSeguro(usuario || '', APP_USER) && igualSeguro(senha || '', APP_PASSWORD);
+  const norm = (s) => String(s || '').trim().toLowerCase();
+  const ok = APP_PASSWORD && igualSeguro(norm(usuario), norm(APP_USER)) && igualSeguro(senha || '', APP_PASSWORD);
   if (!ok) {
     const atual = t && t.ate > Date.now() ? t : { n: 0, ate: Date.now() + 15 * 60 * 1000 };
     atual.n++;
