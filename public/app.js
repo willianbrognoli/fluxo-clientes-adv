@@ -133,6 +133,7 @@
     if (!el) return;
     const a = el.dataset.acao;
     if (a === 'novo') abrirNovo();
+    if (a === 'exportar') abrirExportar();
     if (a === 'sync') sincronizar();
     if (a === 'sair') api('POST', '/api/logout').finally(mostrarLogin);
   });
@@ -714,6 +715,49 @@
         botao.classList.remove('girando');
       }
     });
+  }
+
+  // ---------- Exportar PDF ----------
+  function abrirExportar() {
+    $('#dlg-titulo').textContent = 'Exportar PDF';
+    const n = (id) => S.cartoes.filter((c) => c.etapaId === id).length;
+    $('#dlg-corpo').innerHTML = `
+      <fieldset class="opcoes">
+        <legend>O que exportar</legend>
+        <label class="opcao"><input type="radio" name="tipo" value="processos" checked> Processos (tabela por etapa)</label>
+        <label class="opcao"><input type="radio" name="tipo" value="audiencias"> Agenda de audiências (próximas)</label>
+      </fieldset>
+      <div id="exp-proc">
+        <label>Etapa<select name="etapa">
+          <option value="">Todas as etapas (${S.cartoes.length})</option>
+          ${S.etapas.map((e) => `<option value="${e.id}">${esc(e.nome)} (${n(e.id)})</option>`).join('')}
+        </select></label>
+        <label class="opcao"><input type="checkbox" name="notas"> Incluir anotações</label>
+      </div>
+      <p class="sutil">O PDF sai em A4 deitado, pronto para imprimir. No celular ele vai para Downloads: abra e use Imprimir ou Compartilhar.</p>`;
+    $('#dlg-rodape').innerHTML = `<button type="button" class="btn fantasma" data-fechar>Cancelar</button><button type="submit" class="btn primario">Gerar PDF</button>`;
+    const form = $('#form-cartao');
+    const alternar = () => { $('#exp-proc').hidden = form.tipo.value !== 'processos'; };
+    $$('input[name=tipo]', form).forEach((r) => r.addEventListener('change', alternar));
+    form.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const btn = $('button[type=submit]', dlg);
+      btn.disabled = true;
+      btn.textContent = 'Gerando…';
+      try {
+        if (!window.ExportarPDF) throw new Error('Exportação indisponível.');
+        const r = await window.ExportarPDF.gerar(S, { tipo: form.tipo.value, etapa: form.etapa.value, notas: form.notas.checked });
+        dlg.close();
+        toast(`PDF gerado: ${r.linhas} linha(s)`);
+      } catch (e) {
+        toast(e.message || 'Não foi possível gerar o PDF.');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Gerar PDF';
+      }
+    };
+    if (!dlg.open) dlg.showModal();
+    if (window.ExportarPDF) window.ExportarPDF.carregar().catch(() => {});
   }
 
   function abrirNovo() {
