@@ -1,6 +1,7 @@
 'use strict';
 const express = require('express');
 const crypto = require('crypto');
+const { lerAudiencias, gerarICS } = require('./audiencias');
 const fs = require('fs');
 const path = require('path');
 
@@ -186,6 +187,8 @@ function novoCartao(dados) {
     honorarios: texto(dados.honorarios, 60),
     notas: texto(dados.notas, 5000),
     origem: dados.origem === 'oab' ? 'oab' : 'manual',
+    audiencias: [],
+    audPendente: null,
     novidade: false,
     criadoEm: agora(),
     etapaId: null,
@@ -193,7 +196,25 @@ function novoCartao(dados) {
     historico: []
   };
   moverPara(c, dados.etapaId && db.etapas.some((e) => e.id === dados.etapaId) ? dados.etapaId : db.etapas[0].id);
+  const proc = db.processos && db.processos[soDigitos(c.numero)];
+  if (proc) sincronizarAudiencias(c, proc);
+  // audiência informada no cadastro (à mão ou lida da foto)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dados.audData || '')) {
+    adicionarAudiencia(c, { data: dados.audData, hora: dados.audHora, tipo: dados.audTipo, origem: 'manual' });
+  }
   return c;
+}
+
+function adicionarAudiencia(c, a) {
+  const hora = /^\d{2}:\d{2}$/.test(a.hora || '') ? a.hora : '';
+  c.audiencias = c.audiencias || [];
+  const id = `${a.data}${hora ? 'T' + hora : ''}`;
+  if (!c.audiencias.some((x) => x.id === id)) {
+    c.audiencias.push({ id, data: a.data, hora, tipo: texto(a.tipo, 80) || 'Audiência', origem: a.origem || 'manual' });
+    c.audiencias.sort((x, y) => `${x.data}${x.hora}`.localeCompare(`${y.data}${y.hora}`));
+  }
+  c.audResolvidaEm = new Date().toISOString().slice(0, 10);
+  c.audPendente = null;
 }
 
 // ---------- Rotas: estado ----------
@@ -266,6 +287,49 @@ app.post('/api/cartoes/:id/avancar', (req, res) => {
   moverPara(c, alvo.id);
   salvar(); res.json(estado());
 });
+// ---------- Rotas: audiências ----------
+app.post('/api/cartoes/:id/audiencias', (req, res) => {
+  const c = achaCartao(req.params.id);
+  if (!c) return res.status(404).json({ erro: 'Processo não encontrado.' });
+  const { data, hora, tipo } = req.body || {};
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data || '')) return res.status(400).json({ erro: 'Informe a data da audiência.' });
+  adicionarAudiencia(c, { data, hora, tipo, origem: 'manual' });
+  salvar(); res.json(estado());
+});
+app.delete('/api/cartoes/:id/audiencias/:aid', (req, res) => {
+  const c = achaCartao(req.params.id);
+  if (!c) return res.status(404).json({ erro: 'Processo não encontrado.' });
+  const a = (c.audiencias || []).find((x) => x.id === req.params.aid);
+  c.audiencias = (c.audiencias || []).filter((x) => x.id !== req.params.aid);
+  if (a && a.origem === 'djen') c.audIgnoradas = [...new Set([...(c.audIgnoradas || []), a.id])];
+  salvar(); res.json(estado());
+});
+// "já sei / não precisa": esconde o aviso de audiência marcada sem data
+app.post('/api/cartoes/:id/audiencias/dispensar', (req, res) => {
+  const c = achaCartao(req.params.id);
+  if (!c) return res.status(404).json({ erro: 'Processo não encontrado.' });
+  c.audResolvidaEm = new Date().toISOString().slice(0, 10);
+  c.audPendente = null;
+  salvar(); res.json(estado());
+});
+
+// Link secreto da agenda (.ics) para assinar no celular
+function tokenAgenda() {
+  if (!db.agendaToken) { db.agendaToken = crypto.randomBytes(24).toString('hex'); salvar(); }
+  return db.agendaToken;
+}
+app.get('/api/agenda/link', (req, res) => {
+  const proto = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const caminho = `${host}/agenda/${tokenAgenda()}.ics`;
+  res.json({ https: `${proto}://${caminho}`, webcal: `webcal://${caminho}` });
+});
+app.post('/api/agenda/novo-link', (req, res) => {
+  db.agendaToken = crypto.randomBytes(24).toString('hex');
+  salvar();
+  res.json({ ok: true });
+});
+
 app.delete('/api/cartoes/:id', (req, res) => {
   const c = achaCartao(req.params.id);
   if (!c) return res.status(404).json({ erro: 'Processo não encontrado.' });
@@ -339,8 +403,33 @@ function nomeAdvogado(item) {
   return a ? a.advogado.nome : '';
 }
 
+// "Audiência marcada, falta a data": último aviso do Projudi é DESIGNADA/REDESIGNADA, recente,
+// e nenhuma intimação depois dele trouxe a data real.
+function pendenteDe(p) {
+  const mv = p.audMov;
+  if (!mv || !/DESIGNADA$/.test(mv.situacao)) return null;
+  const limite = new Date(Date.now() - 150 * 86400000).toISOString().slice(0, 10);
+  if (mv.em < limite) return null;
+  if ((p.audiencias || []).some((a) => a.publicadaEm >= mv.em)) return null;
+  return { tipo: mv.tipo, em: mv.em };
+}
+
+// leva as audiências do processo para o cartão (sem apagar as que você cadastrou à mão)
+function sincronizarAudiencias(c, p) {
+  c.audiencias = c.audiencias || [];
+  const ignoradas = new Set(c.audIgnoradas || []);
+  for (const a of p.audiencias || []) {
+    if (ignoradas.has(a.id) || c.audiencias.some((x) => x.id === a.id)) continue;
+    c.audiencias.push({ id: a.id, data: a.data, hora: a.hora, tipo: a.tipo, origem: 'djen' });
+  }
+  c.audiencias.sort((a, b) => `${a.data}${a.hora}`.localeCompare(`${b.data}${b.hora}`));
+  const pend = pendenteDe(p);
+  c.audPendente = pend && !(c.audResolvidaEm && c.audResolvidaEm >= pend.em) ? pend : null;
+}
+
 function integrar(itens) {
   db.processos = db.processos || {};
+  const tocados = new Set();
   for (const it of itens) {
     const num = soDigitos(it.numero_processo);
     if (num.length < 10) continue;
@@ -359,6 +448,17 @@ function integrar(itens) {
     const limpo = String(it.texto || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
     const ma = limpo.match(/(?:partes?\s*(?:\(s\))?\s+)?assistid[oa]s?\s*(?:\([oa]?s?\))?\s*[:\-–]\s*([A-ZÀ-Ý][A-Za-zÀ-ÿ'.\- ]{3,80}?)(?=\s*(?:[,;(]|\bCPF\b|\bCNPJ\b|\s-\s|$))/i);
     if (ma && !/^(por|pel[oa]|defesa|advogad)/i.test(ma[1])) p.assistida = ma[1].trim();
+    // audiências: datas reais no texto (só as que são depois da publicação) e avisos "audiência designada"
+    const aud = lerAudiencias(it.texto);
+    const publ = String(it.data_disponibilizacao || '').slice(0, 10);
+    p.audiencias = p.audiencias || [];
+    for (const a of aud.datas) {
+      if (publ && a.data < publ) continue;
+      const id = `${a.data}${a.hora ? 'T' + a.hora : ''}`;
+      if (!p.audiencias.some((x) => x.id === id)) p.audiencias.push({ id, data: a.data, hora: a.hora, tipo: a.tipo, origem: 'djen', publicadaEm: publ });
+    }
+    if (aud.movimento && (!p.audMov || publ >= p.audMov.em)) p.audMov = { ...aud.movimento, em: publ };
+    tocados.add(num);
     if (!p.intimacoes.some((x) => x.id === it.id)) {
       p.intimacoes.push({
         id: it.id,
@@ -378,6 +478,13 @@ function integrar(itens) {
     }
     p.sugestaoCliente = p.assistida || (candidato ? candidato.nome : (p.partes.some((x) => x.nome === 'SIGILO') ? 'Processo em sigilo' : ''));
     db.processos[num] = p;
+  }
+  // audiências chegam ao cartão mesmo quando a intimação já era conhecida (ex.: busca completa de novo)
+  for (const num of tocados) {
+    const p = db.processos[num];
+    p.audPendente = pendenteDe(p);
+    const c = db.cartoes.find((x) => soDigitos(x.numero) === num);
+    if (c) sincronizarAudiencias(c, p);
   }
   // distribuir: quadro, descartados ou encontrados
   for (const p of Object.values(db.processos)) {
@@ -476,6 +583,33 @@ app.post('/api/sync/fim', (req, res) => {
   else { db.sync.erro = null; db.sync.ultimaOk = agora(); db.sync.lidos = Number(req.body.lidos) || 0; }
   salvar();
   res.json(estado());
+});
+
+// ---------- Agenda (.ics) pública por link secreto: o app de calendário não faz login ----------
+app.get('/agenda/:token.ics', (req, res) => {
+  const tok = String(req.params.token || '');
+  if (!db.agendaToken || tok.length !== db.agendaToken.length || !igualSeguro(tok, db.agendaToken)) {
+    return res.status(404).send('Não encontrado');
+  }
+  const desde = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+  const eventos = [];
+  for (const c of db.cartoes) {
+    for (const a of c.audiencias || []) {
+      if (a.data < desde) continue;
+      eventos.push({
+        uid: `aud-${c.id}-${a.id}@fluxo-clientes`,
+        data: a.data,
+        hora: a.hora,
+        titulo: `${a.tipo || 'Audiência'} - ${c.cliente}`,
+        local: c.orgao,
+        descricao: [`Cliente: ${c.cliente}`, c.numero ? `Processo: ${mascaraCNJ(c.numero)}` : '', c.classe ? `Classe: ${c.classe}` : '', c.orgao ? `Vara: ${c.orgao}` : '', c.telefone ? `Telefone: ${c.telefone}` : '']
+          .filter(Boolean).join('\n')
+      });
+    }
+  }
+  res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.send(gerarICS(eventos, 'Audiências - Fluxo de Clientes'));
 });
 
 // ---------- Front-end ----------

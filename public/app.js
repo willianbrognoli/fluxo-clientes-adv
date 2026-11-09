@@ -239,6 +239,131 @@
     if (vista === 'encontrados') renderEncontrados();
     if (vista === 'etapas') renderEtapas();
     if (vista === 'mais') renderMais();
+    if (vista === 'agenda') renderAgenda();
+    const pend = S.cartoes.filter((c) => c.audPendente).length;
+    const ca = $('#cont-agenda');
+    ca.hidden = !pend;
+    ca.textContent = pend;
+  }
+
+  // ---------- Audiências ----------
+  const hojeISO = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const somaDias = (iso, n) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); };
+  const diaLongo = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
+  const diaCurto = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+  const proximaAud = (c) => (c.audiencias || []).filter((a) => a.data >= hojeISO())[0];
+
+  function selosAudiencia(c) {
+    const p = proximaAud(c);
+    const out = [];
+    if (p) {
+      const quando = p.data === hojeISO() ? 'HOJE' : p.data === somaDias(hojeISO(), 1) ? 'amanhã' : dataBR(p.data).slice(0, 5);
+      out.push(`<span class="selo aud">Audiência ${quando}${p.hora ? ' às ' + p.hora : ''}</span>`);
+    }
+    if (c.audPendente) out.push('<span class="selo">Audiência marcada: falta a data</span>');
+    return out.length ? `<span class="cartao-selos">${out.join('')}</span>` : '';
+  }
+
+  function formAudHTML(prefixo) {
+    return `<div class="linha-aud">
+      <label>Data<input type="date" id="${prefixo}-data"></label>
+      <label>Hora<input type="time" id="${prefixo}-hora"></label>
+      <label class="largo">Tipo (opcional)<input id="${prefixo}-tipo" placeholder="Ex.: instrução e julgamento" autocomplete="off"></label>
+    </div>`;
+  }
+  async function salvarAud(id, prefixo) {
+    const data = $(`#${prefixo}-data`).value;
+    if (!data) { toast('Escolha a data da audiência'); $(`#${prefixo}-data`).focus(); return false; }
+    const hora = $(`#${prefixo}-hora`).value;
+    const t = $(`#${prefixo}-tipo`).value.trim();
+    await acao('POST', `/api/cartoes/${id}/audiencias`, { data, hora, tipo: t ? (/^audi/i.test(t) ? t : 'Audiência de ' + t.replace(/^de\s+/i, '')) : 'Audiência' });
+    toast(`Audiência salva: ${dataBR(data)}${hora ? ' às ' + hora : ''}`);
+    return true;
+  }
+
+  // seção "Audiências" dentro do editar processo
+  function renderAudSecao(id) {
+    const c = S.cartoes.find((x) => x.id === id);
+    const box = $('#aud-secao');
+    if (!c || !box) return;
+    const hoje = hojeISO();
+    box.innerHTML = `
+      ${c.audPendente ? `<div class="pendente"><span><strong>Audiência marcada, falta a data.</strong> ${esc(c.audPendente.tipo)} (aviso de ${dataBR(c.audPendente.em)}). Confira no Projudi e coloque a data abaixo.</span>
+        <button type="button" class="btn fantasma" data-dispensar>Não precisa</button></div>` : ''}
+      <div class="aud-lista">${(c.audiencias || []).slice().reverse().slice(0, 8).map((a) => `
+        <div class="aud-linha ${a.data < hoje ? 'passada' : ''}">
+          <div><strong>${diaCurto(a.data)}${a.hora ? ' · ' + a.hora : ''}</strong><br><small>${esc(a.tipo || 'Audiência')} · ${a.origem === 'djen' ? 'lida do Diário' : 'informada por você'}</small></div>
+          <button type="button" class="btn icone" data-aud-del="${esc(a.id)}" aria-label="Apagar audiência de ${dataBR(a.data)}">${ICON.lixo}</button>
+        </div>`).join('') || '<p class="sutil">Nenhuma audiência cadastrada.</p>'}</div>
+      ${formAudHTML('aud-novo')}
+      <button type="button" class="btn" data-aud-add>Adicionar audiência</button>`;
+    $('[data-aud-add]', box).onclick = async () => { try { if (await salvarAud(id, 'aud-novo')) renderAudSecao(id); } catch {} };
+    $$('[data-aud-del]', box).forEach((b) => b.onclick = async () => {
+      if (!confirm('Apagar esta audiência da agenda?')) return;
+      try { await acao('DELETE', `/api/cartoes/${id}/audiencias/${encodeURIComponent(b.dataset.audDel)}`); renderAudSecao(id); } catch {}
+    });
+    const disp = $('[data-dispensar]', box);
+    if (disp) disp.onclick = async () => { try { await acao('POST', `/api/cartoes/${id}/audiencias/dispensar`); renderAudSecao(id); } catch {} };
+  }
+
+  let linkAgenda = null;
+  async function prepararLinks() {
+    if (!linkAgenda) linkAgenda = await api('GET', '/api/agenda/link').catch(() => null);
+    if (!linkAgenda) return;
+    $('#ag-google').href = `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(linkAgenda.webcal)}`;
+    $('#ag-webcal').href = linkAgenda.webcal;
+  }
+  $('#ag-copiar').addEventListener('click', async () => {
+    await prepararLinks();
+    try { await navigator.clipboard.writeText(linkAgenda.https); toast('Link da agenda copiado'); }
+    catch { prompt('Copie o link da agenda:', linkAgenda.https); }
+  });
+  $('#ag-novo').addEventListener('click', async () => {
+    if (!confirm('Gerar um link novo? O link antigo para de funcionar e você precisa assinar a agenda de novo no celular.')) return;
+    await api('POST', '/api/agenda/novo-link').catch(() => {});
+    linkAgenda = null;
+    await prepararLinks();
+    toast('Link novo gerado. Assine a agenda de novo.');
+  });
+
+  function renderAgenda() {
+    prepararLinks();
+    const hoje = hojeISO();
+    const amanha = somaDias(hoje, 1);
+    const pend = S.cartoes.filter((c) => c.audPendente);
+    $('#agenda-pendentes').innerHTML = pend.length ? `<p class="ag-dia hoje">Audiência marcada, falta a data (${pend.length})</p>` + pend.map((c) => `
+      <div class="pendente" data-id="${c.id}">
+        <span><strong>${esc(c.cliente)}</strong><br>${esc(c.audPendente.tipo)} · aviso de ${dataBR(c.audPendente.em)}<br><span class="num">${esc(cnj(c.numero))}</span></span>
+        ${formAudHTML('pend-' + c.id)}
+        <div class="item-acoes"><button type="button" class="btn fantasma" data-dispensar>Não precisa</button><button type="button" class="btn primario" data-salvar>Salvar data</button></div>
+      </div>`).join('') : '';
+    $$('#agenda-pendentes .pendente').forEach((el) => {
+      const id = el.dataset.id;
+      $('[data-salvar]', el).onclick = () => salvarAud(id, 'pend-' + id).catch(() => {});
+      $('[data-dispensar]', el).onclick = () => acao('POST', `/api/cartoes/${id}/audiencias/dispensar`).catch(() => {});
+    });
+
+    const itens = [];
+    for (const c of S.cartoes) for (const a of c.audiencias || []) if (a.data >= hoje) itens.push({ c, a });
+    itens.sort((x, y) => `${x.a.data}${x.a.hora || '99'}`.localeCompare(`${y.a.data}${y.a.hora || '99'}`));
+    let html = '', dia = '';
+    for (const { c, a } of itens) {
+      if (a.data !== dia) {
+        dia = a.data;
+        const rot = a.data === hoje ? 'Hoje' : a.data === amanha ? 'Amanhã' : diaLongo(a.data);
+        html += `<p class="ag-dia ${a.data === hoje ? 'hoje' : ''}">${esc(rot)}</p>`;
+      }
+      html += `<button type="button" class="ag-item" data-id="${c.id}">
+        <span class="ag-hora">${a.hora || '--:--'}<small>${dataBR(a.data).slice(0, 5)}</small></span>
+        <span class="ag-info"><strong>${esc(c.cliente)}</strong><span class="sutil">${esc(a.tipo || 'Audiência')}</span>
+        <span class="cartao-info">${esc([cnj(c.numero), c.orgao].filter(Boolean).join(' · '))}</span></span>
+      </button>`;
+    }
+    $('#agenda-lista').innerHTML = html || `<div class="vazio"><strong>Nenhuma audiência futura</strong>Quando uma intimação trouxer a data, ela aparece aqui. Você também pode colocar a data no editar do processo.</div>`;
+    $$('#agenda-lista .ag-item').forEach((b) => b.addEventListener('click', () => abrirCartao(b.dataset.id)));
   }
 
   function filtrados() {
@@ -301,6 +426,7 @@
         ${c.numero ? `<span class="cartao-proc num">${esc(cnj(c.numero))}</span>` : ''}
         ${info ? `<span class="cartao-info">${esc(info)}</span>` : ''}
         <span class="cartao-meta"><span>${diasDesde(c.etapaDesde)}</span>${c.honorarios ? `<span>Honorários: ${esc(c.honorarios)}</span>` : ''}</span>
+        ${selosAudiencia(c)}
       </button>
       <div class="cartao-acoes">
         ${i > 0 ? `<button type="button" class="btn btn-voltar" aria-label="Voltar para ${esc(S.etapas[i - 1].nome)}" title="Voltar etapa">${ICON.voltar}</button>` : ''}
@@ -511,6 +637,11 @@
         if (preencher('orgao', c.orgao)) achados.push('vara');
         if (preencher('classe', c.classe)) achados.push('classe');
         if (preencher('telefone', c.telefone)) achados.push('telefone');
+        if (c.audiencia && form.audData && !form.audData.value) {
+          form.audData.value = c.audiencia.data;
+          if (c.audiencia.hora) form.audHora.value = c.audiencia.hora;
+          achados.push('data da audiência');
+        }
         if (c.valor && !form.notas.value) form.notas.value = `Valor da causa: ${c.valor}`;
         // a parte assistida é o cliente: tem prioridade sobre qualquer outro nome
         if (c.assistida[0]) { form.cliente.value = titulo(c.assistida[0]); achados.push('cliente (parte assistida)'); }
@@ -557,7 +688,13 @@
         <div id="foto-partes"></div>
         <details id="foto-texto" hidden><summary>Ver texto lido da foto</summary><textarea readonly rows="6" aria-label="Texto lido da foto"></textarea></details>
       </div>
-      ${campos({ etapaId: vista === 'quadro' ? etapaAtiva : S.etapas[0].id })}`;
+      ${campos({ etapaId: vista === 'quadro' ? etapaAtiva : S.etapas[0].id })}
+      <p class="secao-titulo">Audiência (opcional)</p>
+      <div class="linha-aud">
+        <label>Data<input type="date" name="audData"></label>
+        <label>Hora<input type="time" name="audHora"></label>
+        <label class="largo">Tipo<input name="audTipo" placeholder="Ex.: instrução e julgamento" autocomplete="off"></label>
+      </div>`;
     $('#dlg-rodape').innerHTML = `<button type="button" class="btn fantasma" data-fechar>Cancelar</button><button type="submit" class="btn primario">Adicionar</button>`;
     const form = $('#form-cartao');
     ligarFoto(form);
@@ -586,6 +723,8 @@
     const intims = (c.intimacoes || []).slice(0, 15);
     $('#dlg-corpo').innerHTML = `
       ${campos(c)}
+      <p class="secao-titulo">Audiências</p>
+      <div id="aud-secao" class="aud-secao"></div>
       ${tel ? `<a class="btn" href="https://wa.me/${tel.length <= 11 ? '55' + tel : tel}" target="_blank" rel="noopener">Abrir conversa no WhatsApp</a>` : ''}
       ${partes.length ? `<p class="secao-titulo">Partes</p><div class="partes">${partes.map((p) => `<span class="parte">${esc(p.nome)} <small>${POLO[p.polo] || ''}</small></span>`).join('')}</div>` : ''}
       ${intims.length ? `<p class="secao-titulo">Intimações recentes</p>${intims.map((x, k) => `
@@ -616,7 +755,8 @@
       if (!confirm(msg)) return;
       try { await acao('DELETE', `/api/cartoes/${id}`); dlg.close(); toast('Removido do quadro'); } catch {}
     };
-    dlg.showModal();
+    renderAudSecao(id);
+    if (!dlg.open) dlg.showModal();
     $('#dlg-corpo').scrollTop = 0;
     if (c.novidade) api('PATCH', `/api/cartoes/${id}`, { novidade: false }).then((n) => { S = n; render(); }).catch(() => {});
   }

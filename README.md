@@ -7,6 +7,8 @@ Quadro de etapas para acompanhar processos e clientes de um escritório de advoc
 - **Importação pela OAB:** consulta a API pública do Diário de Justiça Eletrônico Nacional (CNJ, `comunicaapi.pje.jus.br`) a cada 6 horas e na hora em que você pedir. Os processos novos caem em **Encontrados**, onde você **adiciona ao quadro** (escolhendo quem é o cliente entre as partes) ou **descarta**. O que você descartou ou removeu não volta sozinho e pode ser restaurado em *Mais › Descartados*.
 - **Cadastro manual:** botão **+** (nome, telefone/WhatsApp, nº CNJ, vara, classe, honorários e anotações).
 - Quando sai intimação nova num processo que já está no quadro, o cartão ganha o selo **"Nova intimação"**, com link para o tribunal.
+- **Audiências:** quando a intimação traz a data ("para o dia 17/08/2026, às 13:00"), a audiência entra no processo sozinha. Quando o Projudi só avisa "AUDIÊNCIA DESIGNADA", o processo ganha o selo "falta a data", e você completa a data na aba **Agenda** ou no editar do processo. A agenda pode ser **assinada no Google Agenda ou no iPhone** (link `.ics` secreto), com avisos 1 dia antes e 2 horas antes.
+- **Leitura por foto sem IA:** OCR (Tesseract) roda no próprio aparelho e regras fixas extraem nº CNJ, vara, classe, partes, parte assistida (= cliente), telefone e data de audiência. Funciona também com telas em duas colunas que quebram linha.
 - No celular, as etapas aparecem como abas roláveis e a navegação fica na barra inferior. No computador, as etapas viram colunas e dá para arrastar e soltar os cartões. O app também pode ser instalado na tela inicial (PWA).
 
 ## Rodar

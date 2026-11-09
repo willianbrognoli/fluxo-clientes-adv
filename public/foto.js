@@ -185,6 +185,27 @@
     .trim();
   const pareceRotulo = (l) => ROTULOS.some((r) => r.re.test(l)) || /^(advogad|procurador|n[úu]mero|processo|data|distribu|juiz|magistrad|situa[çc][ãa]o|prioridade|segredo|prazo|evento|movimenta)/i.test(l);
 
+  // audiência na foto: data (de hoje em diante) perto da palavra "audiência", com hora se houver
+  function acharAudiencia(texto) {
+    const t = String(texto || '').replace(/[ \t]+/g, ' ');
+    const re = /audi[êe]ncia[^\n]{0,120}?(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{2,4})(?:[^\d\n]{0,25}?(\d{1,2})\s*(?:h|:)\s*(\d{2})?)?/gi;
+    const pad = (n) => String(n).padStart(2, '0');
+    const d0 = new Date();
+    const hoje = `${d0.getFullYear()}-${pad(d0.getMonth() + 1)}-${pad(d0.getDate())}`;
+    let m;
+    while ((m = re.exec(t))) {
+      let ano = +m[3]; if (ano < 100) ano += 2000;
+      const dia = +m[1], mes = +m[2];
+      if (mes < 1 || mes > 12 || dia < 1 || dia > 31) continue;
+      const data = `${ano}-${pad(mes)}-${pad(dia)}`;
+      if (data < hoje) continue;
+      const h = m[4] != null ? +m[4] : null;
+      const hora = h != null && h >= 6 && h <= 22 ? `${pad(h)}:${pad(+(m[5] || 0))}` : '';
+      return { data, hora };
+    }
+    return null;
+  }
+
   function extrair(texto) {
     const linhas = texto.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const out = { numero: acharCNJ(texto), classe: '', assunto: '', orgao: '', comarca: '', valor: '', telefone: '', assistida: [], ativo: [], passivo: [] };
@@ -219,6 +240,7 @@
       out.orgao = `${out.orgao} - ${out.comarca}`;
     }
     if (!out.classe && out.assunto) out.classe = out.assunto;
+    out.audiencia = acharAudiencia(texto);
     return out;
   }
 
