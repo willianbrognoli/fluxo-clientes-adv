@@ -107,18 +107,29 @@
         <div class="painel" id="agenda-avisos">
           <h3>Avisos no celular</h3>
           <p class="sutil">Assine a agenda uma vez: as audiências aparecem sozinhas no calendário do celular, com aviso 1 dia antes e 2 horas antes.</p>
-          <div class="item-acoes" style="width:100%">
-            <a class="btn primario" id="ag-google" target="_blank" rel="noopener">Adicionar ao Google Agenda</a>
-            <a class="btn" id="ag-webcal">iPhone / outro calendário</a>
-          </div>
-          <button type="button" class="btn fantasma" id="ag-copiar">Copiar link da agenda</button>
+          <p id="ag-status" class="ag-status" role="status"></p>
+          <button type="button" class="btn primario" id="ag-copiar">Copiar link da agenda</button>
+          <details class="ajuda" open>
+            <summary>Como assinar no Google Agenda (Android)</summary>
+            <ol>
+              <li>Toque em <strong>Copiar link da agenda</strong> (acima).</li>
+              <li>Num <strong>computador</strong>, abra <strong>calendar.google.com</strong> com a mesma conta Google do celular. O app do celular não aceita adicionar por link.</li>
+              <li>Na esquerda, em <strong>Outras agendas</strong>, clique em <strong>+</strong> › <strong>Do URL</strong>, cole o link e clique em <strong>Adicionar agenda</strong>.</li>
+              <li>No celular, abra o app <strong>Google Agenda</strong> › menu ☰ › <strong>Configurações</strong> › "Audiências - Fluxo de Clientes" e ligue <strong>Sincronização</strong>. Nessa mesma tela, em <strong>Notificações padrão</strong>, coloque <em>1 dia antes</em> e <em>2 horas antes</em>.</li>
+              <li>Volte aqui: em alguns minutos deve aparecer "<strong>Google Agenda leu a agenda</strong>".</li>
+            </ol>
+            <p class="sutil">Pelo computador também dá para usar este atalho: <a id="ag-google" target="_blank" rel="noopener">abrir no Google Agenda</a>.</p>
+          </details>
           <details class="ajuda">
-            <summary>Como garantir os avisos</summary>
-            <ul>
-              <li><strong>Google Agenda:</strong> depois de adicionar, abra Configurações › "Audiências - Fluxo de Clientes" › Notificações padrão e coloque <em>1 dia antes</em> e <em>2 horas antes</em>. O Google atualiza agendas assinadas algumas vezes por dia, então audiências novas podem levar algumas horas para aparecer.</li>
-              <li><strong>iPhone:</strong> toque em "iPhone / outro calendário" › Assinar. Em Ajustes › Calendário › Contas › Calendários Assinados, desligue "Remover Alertas" e escolha atualizar a cada hora.</li>
-              <li>O link é secreto: não compartilhe. Se vazar, gere outro abaixo (o antigo para de funcionar).</li>
-            </ul>
+            <summary>Como assinar no iPhone</summary>
+            <ol>
+              <li>Toque em <a id="ag-webcal">assinar no Calendário do iPhone</a> › <strong>Assinar</strong>.</li>
+              <li>Em Ajustes › Calendário › Contas › Calendários Assinados › "Audiências", desligue <strong>Remover Alertas</strong> e em <strong>Buscar</strong> escolha <em>a cada hora</em>.</li>
+            </ol>
+          </details>
+          <details class="ajuda">
+            <summary>Segurança do link</summary>
+            <p class="sutil">O link é secreto: quem tiver ele vê nomes de clientes e processos. Não compartilhe. Se vazar, gere outro (o antigo para de funcionar e é preciso assinar de novo).</p>
             <button type="button" class="btn fantasma perigo-texto" id="ag-novo">Gerar link novo</button>
           </details>
         </div>

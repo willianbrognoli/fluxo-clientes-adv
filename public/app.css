@@ -295,6 +295,13 @@ dialog::backdrop { background: rgb(0 0 0 / .4); }
 .aud-linha div { flex: 1; min-width: 0; font-size: .9rem; }
 .aud-linha small { color: var(--texto-3); }
 .aud-linha.passada { opacity: .6; }
+.ag-status { margin: 0; padding: 10px 12px; border-radius: var(--raio-p); font-size: .88rem; width: 100%; }
+.ag-status:empty { display: none; }
+.ag-status.ok { background: var(--acento-suave); color: var(--texto); }
+.ag-status.alerta { background: var(--alerta-suave); color: var(--texto); }
+.ajuda { width: 100%; }
+.ajuda ol { margin: 4px 0 10px; padding-left: 20px; display: grid; gap: 8px; font-size: .88rem; color: var(--texto-2); }
+.ajuda a { color: var(--acento); font-weight: 600; }
 .ajuda summary { cursor: pointer; font-weight: 600; font-size: .9rem; min-height: 40px; display: flex; align-items: center; }
 .ajuda ul { margin: 4px 0 10px; padding-left: 18px; display: grid; gap: 8px; font-size: .88rem; color: var(--texto-2); }
 

@@ -337,10 +337,22 @@
 
   let linkAgenda = null;
   async function prepararLinks() {
-    if (!linkAgenda) linkAgenda = await api('GET', '/api/agenda/link').catch(() => null);
+    linkAgenda = await api('GET', '/api/agenda/link').catch(() => linkAgenda);
     if (!linkAgenda) return;
-    $('#ag-google').href = `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(linkAgenda.webcal)}`;
+    $('#ag-google').href = `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(linkAgenda.https)}`;
     $('#ag-webcal').href = linkAgenda.webcal;
+    // mostra se o calendário do celular já leu a agenda (prova de que a assinatura funcionou)
+    const L = linkAgenda.leituras || {};
+    const nomes = Object.keys(L);
+    const st = $('#ag-status');
+    if (!nomes.length) {
+      st.className = 'ag-status alerta';
+      st.innerHTML = '<strong>Nenhum calendário leu a agenda ainda.</strong> A assinatura não foi concluída. Siga os passos em "Como assinar" abaixo.';
+    } else {
+      st.className = 'ag-status ok';
+      st.innerHTML = nomes.map((n) => `<strong>${esc(n)}</strong> leu a agenda ${esc(relativo(L[n].em))} (${L[n].eventos} audiência(s)).`).join('<br>') +
+        `<br><span class="sutil">Audiências novas aparecem na próxima leitura. O Google relê a cada poucas horas.</span>`;
+    }
   }
   $('#ag-copiar').addEventListener('click', async () => {
     await prepararLinks();

@@ -322,10 +322,12 @@ app.get('/api/agenda/link', (req, res) => {
   const proto = req.headers['x-forwarded-proto'] || req.protocol;
   const host = req.headers['x-forwarded-host'] || req.headers.host;
   const caminho = `${host}/agenda/${tokenAgenda()}.ics`;
-  res.json({ https: `${proto}://${caminho}`, webcal: `webcal://${caminho}` });
+  const total = db.cartoes.reduce((n, c) => n + (c.audiencias || []).filter((a) => a.data >= new Date().toISOString().slice(0, 10)).length, 0);
+  res.json({ https: `${proto}://${caminho}`, webcal: `webcal://${caminho}`, leituras: db.agendaLeituras || {}, futuras: total });
 });
 app.post('/api/agenda/novo-link', (req, res) => {
   db.agendaToken = crypto.randomBytes(24).toString('hex');
+  db.agendaLeituras = {};
   salvar();
   res.json({ ok: true });
 });
@@ -607,6 +609,13 @@ app.get('/agenda/:token.ics', (req, res) => {
       });
     }
   }
+  // registra quem leu a agenda (Google, iPhone...) para mostrar no app se a assinatura está funcionando
+  const ua = String(req.headers['user-agent'] || '');
+  const quem = /google/i.test(ua) ? 'Google Agenda' : /iOS|iPhone|iPad|CalendarAgent|dataaccessd|Mac OS/i.test(ua) ? 'Calendário da Apple' : /Outlook|Microsoft/i.test(ua) ? 'Outlook' : 'outro aplicativo';
+  db.agendaLeituras = db.agendaLeituras || {};
+  db.agendaLeituras[quem] = { em: agora(), eventos: eventos.length };
+  salvar();
+  console.log(`[agenda] lida por ${quem} (${eventos.length} audiências) UA="${ua.slice(0, 80)}"`);
   res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   res.send(gerarICS(eventos, 'Audiências - Fluxo de Clientes'));
