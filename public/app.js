@@ -32,6 +32,34 @@
   };
   const POLO = { A: 'polo ativo', P: 'polo passivo', T: 'terceiro', S: 'parte assistida' };
 
+  // ---------- WhatsApp ----------
+  // Número no formato internacional (55 + DDD + número). Aceita "(41) 99999-9999", "041...", "+55 ...".
+  function foneWA(tel) {
+    let d = dig(tel).replace(/^0+/, '');
+    if (d.length === 10 || d.length === 11) d = '55' + d;
+    return d.length >= 12 && d.length <= 13 ? d : '';
+  }
+  const primeiroNome = (n) => {
+    const p = String(n || '').trim().split(/\s+/)[0] || '';
+    return p ? p.charAt(0).toUpperCase() + p.slice(1).toLowerCase() : '';
+  };
+  const linkWA = (fone, texto) => `https://wa.me/${fone}${texto ? '?text=' + encodeURIComponent(texto) : ''}`;
+  // Mensagens prontas: a advogada ainda pode editar no WhatsApp antes de enviar.
+  function mensagensWA(c) {
+    const nome = primeiroNome(c.cliente === 'Cliente sem nome' ? '' : c.cliente);
+    const oi = `Olá${nome ? ', ' + nome : ''}! Tudo bem?`;
+    const proc = c.numero ? ` nº ${cnj(c.numero)}` : '';
+    const out = [{ rot: 'Atualização do processo', txt: `${oi} Passando para atualizar você sobre o seu processo${proc}: ` }];
+    const a = proximaAud(c);
+    if (a) {
+      out.push({ rot: 'Lembrete de audiência', txt: `${oi} Lembrando que a ${a.tipo ? a.tipo.toLowerCase() : 'audiência'} do seu processo${proc} está marcada para ${dataBR(a.data)}${a.hora ? ' às ' + a.hora : ''}${c.orgao ? ', em ' + c.orgao : ''}. Qualquer dúvida, estou à disposição.` });
+    }
+    out.push({ rot: 'Honorários', txt: `${oi} Sobre os honorários do seu processo${proc}${c.honorarios ? ' (' + c.honorarios + ')' : ''}: ` });
+    out.push({ rot: 'Pedir documentos', txt: `${oi} Para dar andamento ao seu processo${proc}, preciso que você me envie: ` });
+    out.push({ rot: 'Só abrir a conversa', txt: '' });
+    return out;
+  }
+
   const ICON = {
     check: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
     voltar: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M15 18 9 12l6-6"/></svg>',
@@ -39,6 +67,7 @@
     baixo: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
     lixo: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
     camera: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+    whats: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4.5 19.5 5.6 16A8 8 0 1 1 8.4 18.6z"/><path d="M9.2 8.6c.2-.4.6-.5.9-.4l.8 1.6-.6.8c.5 1.1 1.3 1.9 2.4 2.4l.8-.6 1.6.8c.1.3 0 .7-.4.9-.6.4-1.4.5-2.1.2-1.9-.8-3.3-2.2-4-4-.3-.7-.1-1.3.6-1.7z"/></svg>',
     feito: '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 3 3 5-6"/></svg>'
   };
 
@@ -468,6 +497,7 @@
         ${selosAudiencia(c)}
       </button>
       <div class="cartao-acoes">
+        ${foneWA(c.telefone) ? `<a class="btn btn-whats" href="${linkWA(foneWA(c.telefone), `Olá${primeiroNome(c.cliente) ? ', ' + primeiroNome(c.cliente) : ''}! Tudo bem?`)}" target="_blank" rel="noopener" aria-label="WhatsApp de ${esc(c.cliente)}" title="WhatsApp">${ICON.whats}</a>` : ''}
         ${i > 0 ? `<button type="button" class="btn btn-voltar" aria-label="Voltar para ${esc(S.etapas[i - 1].nome)}" title="Voltar etapa">${ICON.voltar}</button>` : ''}
         ${prox
           ? `<button type="button" class="btn btn-avancar"><span class="check">${ICON.check}</span><span class="rot">Concluir <small>→ ${esc(prox.nome)}</small></span></button>`
@@ -801,19 +831,39 @@
     setTimeout(() => form.cliente.focus(), 60);
   }
 
+  // Seção WhatsApp na folha do processo: usa o telefone digitado no campo (mesmo antes de salvar).
+  function renderWASecao(c) {
+    const box = $('#wa-secao');
+    const campo = $('#form-cartao [name="telefone"]');
+    if (!box || !campo) return;
+    const desenhar = () => {
+      const fone = foneWA(campo.value);
+      if (!fone) {
+        box.innerHTML = `<p class="sutil">${dig(campo.value) ? 'Telefone incompleto: use DDD + número, ex.: (41) 99999-9999.' : 'Preencha o telefone do cliente para enviar mensagens prontas.'}</p>`;
+        return;
+      }
+      const dados = { ...c, cliente: $('#form-cartao [name="cliente"]').value || c.cliente };
+      box.innerHTML = `<p class="sutil">Escolha a mensagem. Ela abre no WhatsApp para você completar ou ajustar antes de enviar.</p>
+        <div class="wa-opcoes">${mensagensWA(dados).map((m) =>
+          `<a class="btn wa-op" href="${linkWA(fone, m.txt)}" target="_blank" rel="noopener">${ICON.whats}<span>${esc(m.rot)}</span></a>`).join('')}</div>`;
+    };
+    campo.addEventListener('input', desenhar);
+    desenhar();
+  }
+
   function abrirCartao(id) {
     const c = S.cartoes.find((x) => x.id === id);
     if (!c) return;
     const conhecidas = c.novidade;
     $('#dlg-titulo').textContent = c.cliente;
-    const tel = dig(c.telefone);
     const partes = (c.partes || []).filter((p) => p.nome !== 'SIGILO');
     const intims = (c.intimacoes || []).slice(0, 15);
     $('#dlg-corpo').innerHTML = `
       ${campos(c)}
       <p class="secao-titulo">Audiências</p>
       <div id="aud-secao" class="aud-secao"></div>
-      ${tel ? `<a class="btn" href="https://wa.me/${tel.length <= 11 ? '55' + tel : tel}" target="_blank" rel="noopener">Abrir conversa no WhatsApp</a>` : ''}
+      <p class="secao-titulo">WhatsApp</p>
+      <div id="wa-secao" class="wa-secao"></div>
       ${partes.length ? `<p class="secao-titulo">Partes</p><div class="partes">${partes.map((p) => `<span class="parte">${esc(p.nome)} <small>${POLO[p.polo] || ''}</small></span>`).join('')}</div>` : ''}
       ${intims.length ? `<p class="secao-titulo">Intimações recentes</p>${intims.map((x, k) => `
         <div class="intim ${conhecidas && k === 0 ? 'nova' : ''}">
@@ -843,6 +893,7 @@
       if (!confirm(msg)) return;
       try { await acao('DELETE', `/api/cartoes/${id}`); dlg.close(); toast('Removido do quadro'); } catch {}
     };
+    renderWASecao(c);
     renderAudSecao(id);
     if (!dlg.open) dlg.showModal();
     $('#dlg-corpo').scrollTop = 0;
