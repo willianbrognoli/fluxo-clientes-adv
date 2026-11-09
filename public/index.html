@@ -102,9 +102,10 @@
       <!-- Agenda -->
       <section id="vista-agenda" class="vista estreita" hidden>
         <div class="cabeca-vista">
-          <h2>Agenda de audiências</h2>
-          <p class="sutil">Datas lidas das intimações ou informadas por você no processo.</p>
+          <h2>Agenda</h2>
+          <p class="sutil">Prazos e audiências: lidos das intimações ou informados por você no processo.</p>
         </div>
+        <div id="agenda-prazos"></div>
         <div id="agenda-pendentes"></div>
         <div id="agenda-lista"></div>
         <div class="painel" id="agenda-avisos">
@@ -156,13 +157,35 @@
         <div class="cabeca-vista"><h2>Mais</h2></div>
         <div class="painel">
           <h3>Exportar e imprimir</h3>
-          <p class="sutil">Gera um PDF com a tabela dos processos (ou das audiências) pronto para imprimir.</p>
+          <p class="sutil">Gera um PDF com a tabela dos processos (ou da agenda de prazos e audiências) pronto para imprimir.</p>
           <button class="btn primario" data-acao="exportar">Exportar PDF</button>
         </div>
         <div class="painel">
           <h3>Busca automática</h3>
           <p class="sutil" id="info-sync-2"></p>
           <button class="btn" data-acao="sync">Buscar intimações agora</button>
+        </div>
+        <div class="painel" id="painel-suspensoes">
+          <h3>Prazos: dias sem expediente</h3>
+          <p class="sutil">A contagem já pula sábados, domingos, feriados nacionais, Carnaval, Sexta-feira Santa, Corpus Christi e o recesso de 20/12 a 20/01. Cadastre aqui o que mais não conta: feriado municipal, suspensão ou indisponibilidade do tribunal. Os prazos em aberto são recalculados.</p>
+          <div id="lista-suspensoes" class="lista compacta"></div>
+          <div class="linha-aud">
+            <label>Data<input id="susp-data" type="text" inputmode="numeric" placeholder="dd/mm/aaaa" maxlength="10" data-mask="data" autocomplete="off"></label>
+            <label>Motivo<input id="susp-nome" placeholder="Ex.: feriado municipal" maxlength="80" autocomplete="off"></label>
+          </div>
+          <button type="button" class="btn" id="susp-add">Adicionar dia</button>
+        </div>
+        <div class="painel">
+          <h3>Trocar senha</h3>
+          <p class="sutil" id="senha-info">Ao trocar, os outros aparelhos conectados precisam entrar de novo.</p>
+          <form id="form-senha" class="form-senha">
+            <input type="email" name="usuario" autocomplete="username" hidden>
+            <label>Senha atual<input name="atual" type="password" autocomplete="current-password" required></label>
+            <label>Nova senha<input name="nova" type="password" autocomplete="new-password" minlength="8" required></label>
+            <label>Repita a nova senha<input name="repete" type="password" autocomplete="new-password" minlength="8" required></label>
+            <p class="sutil">Pelo menos 8 caracteres. Uma frase curta é mais forte e fácil de lembrar.</p>
+            <button class="btn primario" type="submit">Trocar senha</button>
+          </form>
         </div>
         <div class="painel">
           <h3>Descartados</h3>
@@ -197,6 +220,7 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
+  <script src="/prazos.js"></script>
   <script src="/foto.js"></script>
   <script src="/exportar.js"></script>
   <script src="/app.js"></script>

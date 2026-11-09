@@ -110,7 +110,7 @@ function gerarICS(eventos, nome) {
     if (e.local) L.push(`LOCATION:${escIcs(e.local)}`);
     L.push(`DESCRIPTION:${escIcs(e.descricao)}`);
     // avisos: 1 dia antes e 2 horas antes (sem hora: às 9h do dia anterior)
-    const avisos = e.hora ? ['-P1D', '-PT2H'] : ['-PT15H'];
+    const avisos = e.avisos || (e.hora ? ['-P1D', '-PT2H'] : ['-PT15H']);
     for (const tr of avisos) L.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${escIcs(e.titulo)}`, `TRIGGER:${tr}`, 'END:VALARM');
     L.push('END:VEVENT');
   }

@@ -270,7 +270,7 @@
     if (vista === 'etapas') renderEtapas();
     if (vista === 'mais') renderMais();
     if (vista === 'agenda') renderAgenda();
-    const pend = S.cartoes.filter((c) => c.audPendente).length;
+    const pend = S.cartoes.filter((c) => c.audPendente).length + prazosAbertos().filter((x) => diasAte(x.p.fim) <= 3).length;
     const ca = $('#cont-agenda');
     ca.hidden = !pend;
     ca.textContent = pend;
@@ -286,9 +286,30 @@
   const diaCurto = (iso) => new Date(iso + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
   const proximaAud = (c) => (c.audiencias || []).filter((a) => a.data >= hojeISO())[0];
 
+  // ---------- Prazos ----------
+  const diasAte = (iso) => Math.round((new Date(iso + 'T12:00:00') - new Date(hojeISO() + 'T12:00:00')) / 86400000);
+  function quandoPrazo(fim) {
+    const n = diasAte(fim);
+    if (n < 0) return { txt: `VENCIDO ${dataBR(fim).slice(0, 5)}`, cls: 'urgente' };
+    if (n === 0) return { txt: 'vence HOJE', cls: 'urgente' };
+    if (n === 1) return { txt: 'vence amanhã', cls: 'urgente' };
+    return { txt: `${dataBR(fim).slice(0, 5)} · faltam ${n} dias`, cls: n <= 5 ? 'perto' : '' };
+  }
+  const prazosAbertos = () => {
+    const out = [];
+    for (const c of S.cartoes) for (const p of c.prazos || []) if (!p.feito) out.push({ c, p });
+    return out.sort((a, b) => a.p.fim.localeCompare(b.p.fim));
+  };
+  const descrPrazo = (p) => `${p.dias} dias ${p.tipo === 'corridos' ? 'corridos' : 'úteis'} · ${p.modo === 'djen' ? 'disponibilizado no Diário em' : 'intimação/ciência em'} ${dataBR(p.ref)}`;
+
   function selosAudiencia(c) {
     const p = proximaAud(c);
     const out = [];
+    const pz = (c.prazos || []).filter((x) => !x.feito)[0];
+    if (pz) {
+      const q = quandoPrazo(pz.fim);
+      out.push(`<span class="selo prazo ${q.cls}">Prazo ${esc(pz.descricao)}: ${q.txt}</span>`);
+    }
     if (p) {
       const quando = p.data === hojeISO() ? 'HOJE' : p.data === somaDias(hojeISO(), 1) ? 'amanhã' : dataBR(p.data).slice(0, 5);
       out.push(`<span class="selo aud">Audiência ${quando}${p.hora ? ' às ' + p.hora : ''}</span>`);
@@ -365,6 +386,76 @@
     if (disp) disp.onclick = async () => { try { await acao('POST', `/api/cartoes/${id}/audiencias/dispensar`); renderAudSecao(id); } catch {} };
   }
 
+  // seção "Prazos" dentro do processo: lista + calculadora com prévia da contagem
+  function renderPrazoSecao(id, pre) {
+    const c = S.cartoes.find((x) => x.id === id);
+    const box = $('#prazo-secao');
+    if (!c || !box) return;
+    const lista = (c.prazos || []).slice().sort((a, b) => (a.feito - b.feito) || a.fim.localeCompare(b.fim)).slice(0, 12);
+    box.innerHTML = `
+      <div class="aud-lista">${lista.map((p) => {
+        const q = quandoPrazo(p.fim);
+        return `<div class="aud-linha prazo-linha ${p.feito ? 'passada' : q.cls}">
+          <div><strong>${esc(p.descricao)} · ${diaCurto(p.fim)}</strong> ${p.feito ? '<span class="selo neutro">cumprido</span>' : `<span class="selo prazo ${q.cls}">${q.txt}</span>`}<br>
+          <small>${esc(descrPrazo(p))}${(p.pulados || []).length ? ` · pulou: ${p.pulados.map((x) => `${dataBR(x.data).slice(0, 5)}${x.ate ? '–' + dataBR(x.ate).slice(0, 5) : ''} (${esc(x.motivo)})`).join(', ')}` : ''}</small></div>
+          <button type="button" class="btn icone" data-pz-feito="${p.id}" aria-label="${p.feito ? 'Reabrir' : 'Marcar como cumprido'}: ${esc(p.descricao)}" title="${p.feito ? 'Reabrir' : 'Cumprido'}">${p.feito ? ICON.voltar : ICON.check}</button>
+          <button type="button" class="btn icone" data-pz-del="${p.id}" aria-label="Apagar prazo ${esc(p.descricao)}">${ICON.lixo}</button>
+        </div>`;
+      }).join('') || '<p class="sutil">Nenhum prazo cadastrado. Use "Contar prazo" numa intimação abaixo ou preencha aqui.</p>'}</div>
+      <div class="pz-form">
+        <label class="largo">O que é<input id="pz-descr" placeholder="Ex.: contestação, recurso, manifestação" maxlength="120" autocomplete="off"></label>
+        <div class="linha-aud">
+          <label>Data${campoData('id="pz-ref"')}</label>
+          <label>Quantos dias<input id="pz-dias" type="text" inputmode="numeric" maxlength="3" placeholder="15" autocomplete="off"></label>
+        </div>
+        <label>Essa data é
+          <select id="pz-modo">
+            <option value="djen">Disponibilização no Diário (DJEN)</option>
+            <option value="ciencia">Intimação/ciência (leitura no sistema ou publicação)</option>
+          </select></label>
+        <label>Contagem
+          <select id="pz-tipo"><option value="uteis">Dias úteis (CPC)</option><option value="corridos">Dias corridos</option></select></label>
+        <p id="pz-previa" class="pz-previa" aria-live="polite"></p>
+        <button type="button" class="btn" data-pz-add>Adicionar prazo</button>
+      </div>`;
+    const f = { descr: $('#pz-descr'), ref: $('#pz-ref'), dias: $('#pz-dias'), modo: $('#pz-modo'), tipo: $('#pz-tipo') };
+    if (pre) { f.ref.value = dataBR(pre.ref); f.modo.value = pre.modo || 'djen'; }
+    const ler = () => ({ ref: brParaISO(f.ref.value), dias: Number(f.dias.value.replace(/\D/g, '')), modo: f.modo.value, tipo: f.tipo.value });
+    const previa = () => {
+      const d = ler();
+      const r = window.Prazos && d.ref && d.dias ? window.Prazos.calcular({ ...d, extras: S.suspensoes || [] }) : null;
+      $('#pz-previa').innerHTML = r
+        ? `${d.modo === 'djen' ? `Publicação: <strong>${dataBR(r.publicacao)}</strong> · ` : ''}Começa a contar: <strong>${dataBR(r.inicio)}</strong><br>
+           Último dia: <strong class="pz-fim">${diaCurto(r.fim)}</strong>
+           ${r.pulados.length ? `<br><small>Pulou: ${r.pulados.map((x) => `${dataBR(x.data).slice(0, 5)}${x.ate ? '–' + dataBR(x.ate).slice(0, 5) : ''} (${esc(x.motivo)})`).join(', ')}</small>` : ''}
+           <br><small>Ajuda de cálculo: confira sempre. Feriado municipal ou suspensão do tribunal? Cadastre em Mais.</small>`
+        : '<small>Preencha a data e os dias para ver o último dia do prazo.</small>';
+    };
+    Object.values(f).forEach((el) => { el.addEventListener('input', previa); el.addEventListener('change', previa); });
+    // Enter dentro da calculadora não deve salvar/fechar o processo
+    $('.pz-form', box).addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); $('[data-pz-add]', box).click(); } });
+    previa();
+    $('[data-pz-add]', box).onclick = async () => {
+      const d = ler();
+      if (!d.ref) { toast('Digite a data no formato dd/mm/aaaa'); f.ref.focus(); return; }
+      if (!(d.dias >= 1 && d.dias <= 365)) { toast('Informe quantos dias tem o prazo'); f.dias.focus(); return; }
+      try {
+        await acao('POST', `/api/cartoes/${id}/prazos`, { ...d, descricao: f.descr.value.trim() || 'Prazo' });
+        const novo = (S.cartoes.find((x) => x.id === id).prazos || []).slice(-1)[0];
+        toast('Prazo salvo');
+        renderPrazoSecao(id);
+      } catch {}
+    };
+    $$('[data-pz-feito]', box).forEach((b) => b.onclick = async () => {
+      const p = c.prazos.find((x) => x.id === b.dataset.pzFeito);
+      try { await acao('PATCH', `/api/cartoes/${id}/prazos/${p.id}`, { feito: !p.feito }); toast(p.feito ? 'Prazo reaberto' : 'Prazo marcado como cumprido'); renderPrazoSecao(id); } catch {}
+    });
+    $$('[data-pz-del]', box).forEach((b) => b.onclick = async () => {
+      if (!confirm('Apagar este prazo?')) return;
+      try { await acao('DELETE', `/api/cartoes/${id}/prazos/${b.dataset.pzDel}`); renderPrazoSecao(id); } catch {}
+    });
+  }
+
   let linkAgenda = null;
   async function prepararLinks() {
     linkAgenda = await api('GET', '/api/agenda/link').catch(() => linkAgenda);
@@ -380,8 +471,8 @@
       st.innerHTML = '<strong>Nenhum calendário leu a agenda ainda.</strong> A assinatura não foi concluída. Siga os passos em "Como assinar" abaixo.';
     } else {
       st.className = 'ag-status ok';
-      st.innerHTML = nomes.map((n) => `<strong>${esc(n)}</strong> leu a agenda ${esc(relativo(L[n].em))} (${L[n].eventos} audiência(s)).`).join('<br>') +
-        `<br><span class="sutil">Audiências novas aparecem na próxima leitura. O Google relê a cada poucas horas.</span>`;
+      st.innerHTML = nomes.map((n) => `<strong>${esc(n)}</strong> leu a agenda ${esc(relativo(L[n].em))} (${L[n].eventos} evento(s)).`).join('<br>') +
+        `<br><span class="sutil">Prazos e audiências novos aparecem na próxima leitura. O Google relê a cada poucas horas.</span>`;
     }
   }
   $('#ag-copiar').addEventListener('click', async () => {
@@ -401,6 +492,23 @@
     prepararLinks();
     const hoje = hojeISO();
     const amanha = somaDias(hoje, 1);
+    const pzs = prazosAbertos();
+    $('#agenda-prazos').innerHTML = pzs.length ? `<p class="ag-dia">Prazos em aberto (${pzs.length})</p>` + pzs.map(({ c, p }) => {
+      const q = quandoPrazo(p.fim);
+      return `<div class="ag-item ag-prazo ${q.cls}">
+        <button type="button" class="ag-abrir" data-id="${c.id}">
+          <span class="ag-hora">${dataBR(p.fim).slice(0, 5)}<small>${new Date(p.fim + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'short' })}</small></span>
+          <span class="ag-info"><strong>${esc(c.cliente)}</strong><span class="sutil">Prazo: ${esc(p.descricao)} · <span class="selo prazo ${q.cls}">${q.txt}</span></span>
+          <span class="cartao-info">${esc([cnj(c.numero), c.orgao].filter(Boolean).join(' · '))}</span></span>
+        </button>
+        <button type="button" class="btn icone" data-feito="${c.id}|${p.id}" aria-label="Marcar prazo ${esc(p.descricao)} de ${esc(c.cliente)} como cumprido" title="Cumprido">${ICON.check}</button>
+      </div>`;
+    }).join('') : '';
+    $$('#agenda-prazos .ag-abrir').forEach((b) => b.addEventListener('click', () => abrirCartao(b.dataset.id)));
+    $$('#agenda-prazos [data-feito]').forEach((b) => b.addEventListener('click', async () => {
+      const [cid, pid] = b.dataset.feito.split('|');
+      try { await acao('PATCH', `/api/cartoes/${cid}/prazos/${pid}`, { feito: true }); toast('Prazo marcado como cumprido'); } catch {}
+    }));
     const pend = S.cartoes.filter((c) => c.audPendente);
     $('#agenda-pendentes').innerHTML = pend.length ? `<p class="ag-dia hoje">Audiência marcada, falta a data (${pend.length})</p>` + pend.map((c) => `
       <div class="pendente" data-id="${c.id}">
@@ -430,6 +538,7 @@
         <span class="cartao-info">${esc([cnj(c.numero), c.orgao].filter(Boolean).join(' · '))}</span></span>
       </button>`;
     }
+    if (html) html = '<p class="ag-dia">Audiências</p>' + html;
     $('#agenda-lista').innerHTML = html || `<div class="vazio"><strong>Nenhuma audiência futura</strong>Quando uma intimação trouxer a data, ela aparece aqui. Você também pode colocar a data no editar do processo.</div>`;
     $$('#agenda-lista .ag-item').forEach((b) => b.addEventListener('click', () => abrirCartao(b.dataset.id)));
   }
@@ -638,6 +747,17 @@
 
   // ---------- Mais ----------
   function renderMais() {
+    const sl = $('#lista-suspensoes');
+    const sus = S.suspensoes || [];
+    sl.innerHTML = sus.length ? sus.map((x) => `
+      <div class="item"><div><strong>${diaCurto(x.data)}</strong><div class="sutil">${esc(x.nome || 'dia sem expediente')}</div></div>
+      <button type="button" class="btn icone" data-susp-del="${x.data}" aria-label="Remover ${dataBR(x.data)}">${ICON.lixo}</button></div>`).join('')
+      : '<p class="sutil">Nenhum dia cadastrado.</p>';
+    $$('[data-susp-del]', sl).forEach((b) => b.onclick = () =>
+      acao('PUT', '/api/suspensoes', { datas: sus.filter((x) => x.data !== b.dataset.suspDel) }).then(() => toast('Removido. Prazos recalculados.')).catch(() => {}));
+    $('#senha-info').textContent = S.senhaTrocadaEm
+      ? `Senha trocada pelo app em ${dataBR(S.senhaTrocadaEm)}. Ao trocar, os outros aparelhos precisam entrar de novo.`
+      : 'Você ainda usa a senha criada na instalação. Troque por uma só sua. Ao trocar, os outros aparelhos precisam entrar de novo.';
     const el = $('#lista-descartados');
     el.innerHTML = S.descartados.length ? S.descartados.map((d) => `
       <div class="item" data-numero="${d.numero}">
@@ -649,6 +769,31 @@
       toast('Restaurado: está em Encontrados');
     }));
   }
+
+  $('#susp-add').addEventListener('click', async () => {
+    const data = brParaISO($('#susp-data').value);
+    if (!data) { toast('Digite a data no formato dd/mm/aaaa'); $('#susp-data').focus(); return; }
+    const nome = $('#susp-nome').value.trim();
+    try {
+      await acao('PUT', '/api/suspensoes', { datas: [...(S.suspensoes || []), { data, nome }] });
+      $('#susp-data').value = ''; $('#susp-nome').value = '';
+      toast('Dia cadastrado. Prazos em aberto recalculados.');
+    } catch {}
+  });
+  $('#form-senha').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const f = ev.target;
+    if (f.nova.value !== f.repete.value) { toast('As duas novas senhas não são iguais'); f.repete.focus(); return; }
+    const btn = $('button[type=submit]', f);
+    btn.disabled = true;
+    try {
+      await api('POST', '/api/senha', { atual: f.atual.value, nova: f.nova.value });
+      f.reset();
+      S = await api('GET', '/api/estado'); render();
+      toast('Senha trocada. Os outros aparelhos vão pedir a senha nova.');
+    } catch (e) { toast(e.message); }
+    btn.disabled = false;
+  });
 
   // ---------- Folha de detalhe ----------
   const dlg = $('#dlg');
@@ -755,7 +900,7 @@
       <fieldset class="opcoes">
         <legend>O que exportar</legend>
         <label class="opcao"><input type="radio" name="tipo" value="processos" checked> Processos (tabela por etapa)</label>
-        <label class="opcao"><input type="radio" name="tipo" value="audiencias"> Agenda de audiências (próximas)</label>
+        <label class="opcao"><input type="radio" name="tipo" value="audiencias"> Agenda: prazos em aberto e próximas audiências</label>
       </fieldset>
       <div id="exp-proc">
         <label>Etapa<select name="etapa">
@@ -860,6 +1005,8 @@
     const intims = (c.intimacoes || []).slice(0, 15);
     $('#dlg-corpo').innerHTML = `
       ${campos(c)}
+      <p class="secao-titulo">Prazos</p>
+      <div id="prazo-secao" class="aud-secao"></div>
       <p class="secao-titulo">Audiências</p>
       <div id="aud-secao" class="aud-secao"></div>
       <p class="secao-titulo">WhatsApp</p>
@@ -869,7 +1016,10 @@
         <div class="intim ${conhecidas && k === 0 ? 'nova' : ''}">
           <span class="data">${dataBR(x.data)} · ${esc(x.tipo)}</span>
           <span>${esc(x.texto)}</span>
-          ${/^https:\/\//.test(x.link || '') ? `<a href="${esc(x.link)}" target="_blank" rel="noopener noreferrer">Abrir no tribunal</a>` : ''}
+          <span class="intim-acoes">
+            ${/^\d{4}-\d{2}-\d{2}/.test(x.data || '') ? `<button type="button" class="btn" data-contar="${esc(x.data.slice(0, 10))}">Contar prazo</button>` : ''}
+            ${/^https:\/\//.test(x.link || '') ? `<a href="${esc(x.link)}" target="_blank" rel="noopener noreferrer">Abrir no tribunal</a>` : ''}
+          </span>
         </div>`).join('')}` : ''}
       ${(c.historico || []).length ? `<p class="secao-titulo">Histórico de etapas</p><ul class="historico">${c.historico.slice().reverse().slice(0, 12).map((h) =>
         `<li>${dataBR(h.em)} — ${esc((S.etapas.find((e) => e.id === h.etapaId) || h).nome || '')}</li>`).join('')}</ul>` : ''}`;
@@ -894,6 +1044,12 @@
       try { await acao('DELETE', `/api/cartoes/${id}`); dlg.close(); toast('Removido do quadro'); } catch {}
     };
     renderWASecao(c);
+    renderPrazoSecao(id);
+    $$('#dlg-corpo [data-contar]').forEach((b) => b.onclick = () => {
+      renderPrazoSecao(id, { ref: b.dataset.contar, modo: 'djen' });
+      $('#prazo-secao').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setTimeout(() => $('#pz-descr').focus({ preventScroll: true }), 350);
+    });
     renderAudSecao(id);
     if (!dlg.open) dlg.showModal();
     $('#dlg-corpo').scrollTop = 0;

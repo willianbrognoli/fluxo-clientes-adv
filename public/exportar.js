@@ -44,9 +44,11 @@
     let titulo, head, body, colunas;
 
     if (opcoes.tipo === 'audiencias') {
-      titulo = 'Agenda de audiências';
+      titulo = 'Agenda de prazos e audiências';
       const itens = [];
       for (const c of S.cartoes) for (const a of c.audiencias || []) if (a.data >= hoje()) itens.push({ c, a });
+      // prazos em aberto (inclusive vencidos e não cumpridos) entram como "Prazo: ..."
+      for (const c of S.cartoes) for (const p of c.prazos || []) if (!p.feito) itens.push({ c, a: { data: p.fim, hora: '', tipo: `PRAZO (último dia): ${p.descricao}` } });
       itens.sort((x, y) => `${x.a.data}${x.a.hora || '99'}`.localeCompare(`${y.a.data}${y.a.hora || '99'}`));
       head = [['Data', 'Hora', 'Cliente', 'Tipo', 'Nº do processo', 'Vara / órgão', 'Telefone']];
       body = itens.map(({ c, a }) => [br(a.data), a.hora || '', c.cliente, a.tipo || 'Audiência', cnj(c.numero), c.orgao, c.telefone || '']);

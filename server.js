@@ -2,6 +2,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { lerAudiencias, gerarICS } = require('./audiencias');
+const Prazos = require('./public/prazos');
 const fs = require('fs');
 const path = require('path');
 
@@ -66,9 +67,22 @@ salvar();
 function assinar(valor) {
   return crypto.createHmac('sha256', SESSION_SECRET).update(valor).digest('hex');
 }
+// Senha: a trocada pelo app (hash scrypt no db) vale mais que a do Easypanel (APP_PASSWORD).
+// RESETAR_SENHA=1 no Easypanel apaga a senha do app e volta a valer a APP_PASSWORD (para quando esquecer).
+if (process.env.RESETAR_SENHA === '1' && db.auth) { delete db.auth; salvar(); console.log('[auth] senha do app apagada: vale a APP_PASSWORD'); }
+const versaoSessao = () => (db.auth && db.auth.versao) || 0;
+function hashSenha(senha, sal) { return crypto.scryptSync(String(senha), sal, 64).toString('hex'); }
+function senhaConfere(senha) {
+  if (db.auth && db.auth.hash) {
+    const h = Buffer.from(hashSenha(senha || '', db.auth.sal), 'hex');
+    const e = Buffer.from(db.auth.hash, 'hex');
+    return h.length === e.length && crypto.timingSafeEqual(h, e);
+  }
+  return !!APP_PASSWORD && igualSeguro(senha || '', APP_PASSWORD);
+}
 function criarToken(usuario) {
   const exp = Date.now() + 30 * 24 * 3600 * 1000;
-  const corpo = Buffer.from(JSON.stringify({ u: usuario, exp })).toString('base64url');
+  const corpo = Buffer.from(JSON.stringify({ u: usuario, exp, v: versaoSessao() })).toString('base64url');
   return corpo + '.' + assinar(corpo);
 }
 function lerToken(token) {
@@ -78,7 +92,7 @@ function lerToken(token) {
   if (sig.length !== esperado.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(esperado))) return null;
   try {
     const dados = JSON.parse(Buffer.from(corpo, 'base64url').toString());
-    return dados.exp > Date.now() ? dados : null;
+    return dados.exp > Date.now() && (dados.v || 0) === versaoSessao() ? dados : null;
   } catch { return null; }
 }
 function cookies(req) {
@@ -119,7 +133,7 @@ app.post('/api/login', (req, res) => {
   }
   const { usuario, senha } = req.body || {};
   const norm = (s) => String(s || '').trim().toLowerCase();
-  const ok = APP_PASSWORD && igualSeguro(norm(usuario), norm(APP_USER)) && igualSeguro(senha || '', APP_PASSWORD);
+  const ok = igualSeguro(norm(usuario), norm(APP_USER)) && senhaConfere(senha);
   if (!ok) {
     const atual = t && t.ate > Date.now() ? t : { n: 0, ate: Date.now() + 15 * 60 * 1000 };
     atual.n++;
@@ -142,6 +156,31 @@ app.use('/api', (req, res, next) => {
   res.status(401).json({ erro: 'Não autenticado' });
 });
 
+// Trocar a senha pelo app. Desconecta os outros aparelhos (a sessão atual recebe um cookie novo).
+app.post('/api/senha', (req, res) => {
+  const ip = req.ip;
+  const t = tentativas.get(ip);
+  if (t && t.n >= 8 && t.ate > Date.now()) return res.status(429).json({ erro: 'Muitas tentativas. Aguarde alguns minutos.' });
+  const { atual, nova } = req.body || {};
+  if (!senhaConfere(atual)) {
+    const at = t && t.ate > Date.now() ? t : { n: 0, ate: Date.now() + 15 * 60 * 1000 };
+    at.n++; tentativas.set(ip, at);
+    return res.status(400).json({ erro: 'A senha atual não confere.' });
+  }
+  const n = String(nova || '');
+  if (n.length < 8) return res.status(400).json({ erro: 'A nova senha precisa ter pelo menos 8 caracteres.' });
+  if (n.length > 200) return res.status(400).json({ erro: 'Senha longa demais.' });
+  if (/^(.)\1+$|^1234567|^senha|^password|^abc123/i.test(n) || n.toLowerCase().includes(APP_USER.split('@')[0].toLowerCase())) {
+    return res.status(400).json({ erro: 'Senha fácil demais. Use uma frase ou misture letras e números.' });
+  }
+  const sal = crypto.randomBytes(16).toString('hex');
+  db.auth = { sal, hash: hashSenha(n, sal), versao: versaoSessao() + 1, trocadaEm: agora() };
+  salvar();
+  const seguro = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader('Set-Cookie', `sessao=${criarToken(APP_USER)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30 * 24 * 3600}${seguro ? '; Secure' : ''}`);
+  res.json({ ok: true });
+});
+
 // ---------- Helpers ----------
 const soDigitos = (s) => String(s || '').replace(/\D/g, '');
 function mascaraCNJ(n) {
@@ -158,7 +197,9 @@ function estado() {
     encontrados: Object.values(db.encontrados).sort((a, b) => (b.ultimaData || '').localeCompare(a.ultimaData || '')),
     descartados: Object.values(db.descartados).sort((a, b) => (b.em || '').localeCompare(a.em || '')),
     sync: db.sync,
-    oab: { numero: OAB_NUMERO, uf: OAB_UF }
+    oab: { numero: OAB_NUMERO, uf: OAB_UF },
+    suspensoes: db.suspensoes || [],
+    senhaTrocadaEm: db.auth ? db.auth.trocadaEm : null
   };
 }
 const achaCartao = (id) => db.cartoes.find((c) => c.id === id);
@@ -188,6 +229,7 @@ function novoCartao(dados) {
     notas: texto(dados.notas, 5000),
     origem: dados.origem === 'oab' ? 'oab' : 'manual',
     audiencias: [],
+    prazos: [],
     audPendente: null,
     novidade: false,
     criadoEm: agora(),
@@ -310,6 +352,67 @@ app.post('/api/cartoes/:id/audiencias/dispensar', (req, res) => {
   if (!c) return res.status(404).json({ erro: 'Processo não encontrado.' });
   c.audResolvidaEm = new Date().toISOString().slice(0, 10);
   c.audPendente = null;
+  salvar(); res.json(estado());
+});
+
+// ---------- Rotas: prazos ----------
+const MODOS = ['djen', 'ciencia'];
+const calcularPrazo = (p) => Prazos.calcular({ ref: p.ref, modo: p.modo, dias: p.dias, tipo: p.tipo, extras: db.suspensoes || [] });
+const aplicarCalculo = (p, r) => Object.assign(p, { publicacao: r.publicacao, inicio: r.inicio, fim: r.fim, pulados: r.pulados });
+// quando a lista de dias sem expediente muda, recalcula os prazos em aberto
+function recalcularPrazos() {
+  for (const c of db.cartoes) for (const p of c.prazos || []) {
+    if (p.feito) continue;
+    const r = calcularPrazo(p);
+    if (r) aplicarCalculo(p, r);
+  }
+}
+app.post('/api/cartoes/:id/prazos', (req, res) => {
+  const c = achaCartao(req.params.id);
+  if (!c) return res.status(404).json({ erro: 'Processo não encontrado.' });
+  const b = req.body || {};
+  const p = {
+    id: uid(),
+    descricao: texto(b.descricao, 120) || 'Prazo',
+    ref: String(b.ref || ''),
+    modo: MODOS.includes(b.modo) ? b.modo : 'djen',
+    dias: Math.floor(Number(b.dias)),
+    tipo: b.tipo === 'corridos' ? 'corridos' : 'uteis',
+    feito: false,
+    criadoEm: agora()
+  };
+  const r = calcularPrazo(p);
+  if (!r) return res.status(400).json({ erro: 'Confira a data (dd/mm/aaaa) e o número de dias (1 a 365).' });
+  aplicarCalculo(p, r);
+  c.prazos = c.prazos || [];
+  c.prazos.push(p);
+  c.prazos.sort((x, y) => x.fim.localeCompare(y.fim));
+  salvar(); res.json(estado());
+});
+app.patch('/api/cartoes/:id/prazos/:pid', (req, res) => {
+  const c = achaCartao(req.params.id);
+  const p = c && (c.prazos || []).find((x) => x.id === req.params.pid);
+  if (!p) return res.status(404).json({ erro: 'Prazo não encontrado.' });
+  if ('feito' in (req.body || {})) { p.feito = !!req.body.feito; p.feitoEm = p.feito ? agora() : null; }
+  if (!p.feito) { const r = calcularPrazo(p); if (r) aplicarCalculo(p, r); }
+  salvar(); res.json(estado());
+});
+app.delete('/api/cartoes/:id/prazos/:pid', (req, res) => {
+  const c = achaCartao(req.params.id);
+  if (!c) return res.status(404).json({ erro: 'Processo não encontrado.' });
+  c.prazos = (c.prazos || []).filter((x) => x.id !== req.params.pid);
+  salvar(); res.json(estado());
+});
+// dias sem expediente cadastrados (feriado municipal, suspensão do tribunal...)
+app.put('/api/suspensoes', (req, res) => {
+  const lista = Array.isArray(req.body && req.body.datas) ? req.body.datas : [];
+  const vistas = new Set();
+  db.suspensoes = lista
+    .filter((x) => x && /^\d{4}-\d{2}-\d{2}$/.test(x.data) && !vistas.has(x.data) && vistas.add(x.data))
+    .slice(0, 300)
+    .map((x) => ({ data: x.data, nome: texto(x.nome, 80) }))
+    .sort((a, b) => a.data.localeCompare(b.data));
+  recalcularPrazos();
   salvar(); res.json(estado());
 });
 
@@ -609,13 +712,29 @@ app.get('/agenda/:token.ics', (req, res) => {
       });
     }
   }
+  // prazos em aberto: evento às 9h do último dia (avisos do celular: 1 dia antes e 2 horas antes)
+  for (const c of db.cartoes) {
+    for (const p of c.prazos || []) {
+      if (p.feito || !p.fim || p.fim < desde) continue;
+      eventos.push({
+        uid: `prazo-${c.id}-${p.id}@fluxo-clientes`,
+        data: p.fim,
+        hora: '09:00',
+        titulo: `PRAZO: ${p.descricao} - ${c.cliente}`,
+        local: c.orgao,
+        avisos: ['-P3D', '-P1D', '-PT2H'],
+        descricao: [`Último dia do prazo (${p.dias} dias ${p.tipo === 'corridos' ? 'corridos' : 'úteis'}). Confira a contagem.`, `Cliente: ${c.cliente}`,
+          c.numero ? `Processo: ${mascaraCNJ(c.numero)}` : '', c.orgao ? `Vara: ${c.orgao}` : ''].filter(Boolean).join('\n')
+      });
+    }
+  }
   // registra quem leu a agenda (Google, iPhone...) para mostrar no app se a assinatura está funcionando
   const ua = String(req.headers['user-agent'] || '');
   const quem = /google/i.test(ua) ? 'Google Agenda' : /iOS|iPhone|iPad|CalendarAgent|dataaccessd|Mac OS/i.test(ua) ? 'Calendário da Apple' : /Outlook|Microsoft/i.test(ua) ? 'Outlook' : 'outro aplicativo';
   db.agendaLeituras = db.agendaLeituras || {};
   db.agendaLeituras[quem] = { em: agora(), eventos: eventos.length };
   salvar();
-  console.log(`[agenda] lida por ${quem} (${eventos.length} audiências) UA="${ua.slice(0, 80)}"`);
+  console.log(`[agenda] lida por ${quem} (${eventos.length} eventos) UA="${ua.slice(0, 80)}"`);
   res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   res.send(gerarICS(eventos, 'Audiências - Fluxo de Clientes'));
