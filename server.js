@@ -100,7 +100,7 @@ const tentativas = new Map(); // ip -> { n, ate }
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', true);
-app.use(express.json({ limit: '200kb' }));
+app.use(express.json({ limit: '5mb' }));
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
@@ -393,9 +393,8 @@ function integrar(itens) {
 }
 
 async function sincronizar() {
-  if (db.sync.rodando) return;
+  if (db.sync.rodando || db.sync.servidorBloqueado || process.env.SYNC_SERVIDOR === '0') return;
   db.sync.rodando = true;
-  db.sync.erro = null;
   try {
     let inicio = null;
     if (db.sync.ultimaOk) {
@@ -420,7 +419,13 @@ async function sincronizar() {
     db.sync.lidos = itens.length;
     console.log(`[sync] ${itens.length} intimações lidas`);
   } catch (e) {
-    db.sync.erro = e.message;
+    if (/ 403/.test(e.message)) {
+      // IP do servidor bloqueado (fora do Brasil): a busca passa a ser feita só pelo navegador
+      db.sync.servidorBloqueado = true;
+      console.warn('[sync] DJEN bloqueou o IP do servidor (403). A busca fica a cargo do navegador.');
+    } else {
+      db.sync.erro = e.message;
+    }
     console.error('[sync] erro', e.message);
   } finally {
     db.sync.ultima = agora();
@@ -432,6 +437,38 @@ async function sincronizar() {
 app.post('/api/sincronizar', (req, res) => {
   if (!db.sync.rodando) sincronizar();
   res.json({ ok: true, rodando: true });
+});
+
+// Busca feita pelo navegador (IP brasileiro). O DJEN bloqueia IPs de fora do Brasil,
+// então o servidor (ex.: VPS nos EUA) recebe aqui os itens que o navegador baixou.
+app.get('/api/sync/inicio', (req, res) => {
+  let inicio = null;
+  if (db.sync.ultimaOk) {
+    const d = new Date(db.sync.ultimaOk);
+    d.setDate(d.getDate() - 10);
+    inicio = d.toISOString().slice(0, 10);
+  }
+  res.json({ inicio, oab: { numero: OAB_NUMERO, uf: OAB_UF }, api: API_DJEN });
+});
+// Dados conhecidos de um processo (vindos da busca da OAB), usados para completar a leitura por foto
+app.get('/api/processo/:numero', (req, res) => {
+  const p = (db.processos || {})[soDigitos(req.params.numero)];
+  res.json(p ? { numero: p.numero, tribunal: p.tribunal, orgao: p.orgao, classe: p.classe, partes: p.partes, sugestaoCliente: p.sugestaoCliente } : null);
+});
+
+app.post('/api/sync/lote', (req, res) => {
+  const itens = Array.isArray(req.body.itens) ? req.body.itens.slice(0, 500) : [];
+  integrar(itens.filter((x) => x && typeof x === 'object' && x.numero_processo));
+  salvar();
+  res.json({ ok: true, recebidos: itens.length });
+});
+app.post('/api/sync/fim', (req, res) => {
+  const erro = req.body && req.body.erro ? texto(req.body.erro, 300) : null;
+  db.sync.ultima = agora();
+  if (erro) db.sync.erro = erro;
+  else { db.sync.erro = null; db.sync.ultimaOk = agora(); db.sync.lidos = Number(req.body.lidos) || 0; }
+  salvar();
+  res.json(estado());
 });
 
 // ---------- Front-end ----------

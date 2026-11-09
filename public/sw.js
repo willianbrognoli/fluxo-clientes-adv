@@ -8,7 +8,7 @@ self.addEventListener('activate', (e) => {
 });
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.pathname.startsWith('/api')) return;
+  if (e.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api')) return;
   e.respondWith(fetch(e.request, { cache: 'no-cache' }).then((r) => {
     const copia = r.clone();
     caches.open(CACHE).then((c) => c.put(e.request, copia));

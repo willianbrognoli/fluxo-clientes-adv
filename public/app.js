@@ -38,6 +38,7 @@
     cima: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg>',
     baixo: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>',
     lixo: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
+    camera: '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
     feito: '<svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 3 3 5-6"/></svg>'
   };
 
@@ -113,7 +114,7 @@
     $('#oab-rotulo').textContent = `OAB ${S.oab.numero}/${S.oab.uf}`;
     if (!etapaAtiva || !S.etapas.some((e) => e.id === etapaAtiva)) etapaAtiva = S.etapas[0] && S.etapas[0].id;
     render();
-    if (S.sync.rodando) vigiarSync();
+    if (syncVencida()) sincronizar(true);
   }
 
   // ---------- Navegação ----------
@@ -138,14 +139,71 @@
   $('#btn-sync').addEventListener('click', sincronizar);
 
   // ---------- Sincronização ----------
-  async function sincronizar() {
+  // A busca roda no navegador: o DJEN (CNJ) só aceita IPs do Brasil e o servidor pode estar fora.
+  let syncLocal = false;
+  const enxuto = (it) => ({
+    id: it.id,
+    data_disponibilizacao: it.data_disponibilizacao,
+    siglaTribunal: it.siglaTribunal,
+    tipoComunicacao: it.tipoComunicacao,
+    tipoDocumento: it.tipoDocumento,
+    nomeOrgao: it.nomeOrgao,
+    nomeClasse: it.nomeClasse,
+    numero_processo: it.numero_processo,
+    link: it.link,
+    texto: String(it.texto || '').slice(0, 1200),
+    destinatarios: (it.destinatarios || []).map((d) => ({ nome: d.nome, polo: d.polo })),
+    destinatarioadvogados: (it.destinatarioadvogados || []).map((a) => ({ advogado: a.advogado && { nome: a.advogado.nome, numero_oab: a.advogado.numero_oab } }))
+  });
+  async function sincronizar(silencioso) {
+    if (syncLocal) return;
+    syncLocal = true;
+    render();
+    if (silencioso !== true) toast('Buscando todas as intimações da OAB… pode levar até 1 minuto.');
+    const antes = S.encontrados.length;
+    let lidos = 0;
     try {
-      await api('POST', '/api/sincronizar');
-      S.sync.rodando = true;
+      const cfg = await api('GET', '/api/sync/inicio');
+      let pagina = 1, total = Infinity;
+      while (lidos < total && pagina <= 60) {
+        const url = new URL(cfg.api);
+        url.searchParams.set('numeroOab', cfg.oab.numero);
+        url.searchParams.set('ufOab', cfg.oab.uf);
+        url.searchParams.set('itensPorPagina', '100');
+        url.searchParams.set('pagina', String(pagina));
+        // manual = histórico completo; automática = só os últimos dias
+        if (cfg.inicio && silencioso === true) url.searchParams.set('dataDisponibilizacaoInicio', cfg.inicio);
+        let r;
+        for (let t = 1; t <= 3; t++) {
+          r = await fetch(url, { headers: { Accept: 'application/json' } });
+          if (r.status !== 429) break;
+          await new Promise((ok) => setTimeout(ok, 20000 * t));
+        }
+        if (!r.ok) throw new Error(`Diário de Justiça respondeu ${r.status}`);
+        const j = await r.json();
+        total = Number(j.count || 0);
+        const lote = j.items || [];
+        if (!lote.length) break;
+        await api('POST', '/api/sync/lote', { itens: lote.map(enxuto) });
+        lidos += lote.length;
+        pagina++;
+        await new Promise((ok) => setTimeout(ok, 1200));
+      }
+      S = await api('POST', '/api/sync/fim', { lidos });
+      const pend = S.encontrados.length;
+      if (silencioso !== true || pend > antes) toast(pend ? `Busca concluída: ${pend} processo(s) aguardando em Encontrados` : 'Busca concluída. Nada novo.');
+    } catch (e) {
+      const msg = e instanceof TypeError ? 'sem conexão com o Diário de Justiça' : e.message;
+      try { S = await api('POST', '/api/sync/fim', { erro: msg }); } catch {}
+      toast('Não foi possível buscar agora: ' + msg);
+    } finally {
+      syncLocal = false;
       render();
-      toast('Buscando intimações no Diário de Justiça…');
-      vigiarSync();
-    } catch (e) { toast(e.message); }
+    }
+  }
+  function syncVencida() {
+    const ult = S.sync.ultimaOk ? new Date(S.sync.ultimaOk).getTime() : 0;
+    return Date.now() - ult > 6 * 3600 * 1000;
   }
   function vigiarSync() {
     clearInterval(pollSync);
@@ -171,10 +229,10 @@
     const cont = $('#cont-encontrados');
     cont.hidden = !n;
     cont.textContent = n > 99 ? '99+' : n;
-    $('#btn-sync').classList.toggle('girando', !!S.sync.rodando);
-    $('#btn-sync').disabled = !!S.sync.rodando;
-    const info = S.sync.rodando ? 'Buscando agora…'
-      : `Última busca ${relativo(S.sync.ultimaOk)}. Atualiza sozinho a cada 6 horas.` + (S.sync.erro ? ` Último erro: ${S.sync.erro}` : '');
+    $('#btn-sync').classList.toggle('girando', syncLocal);
+    $('#btn-sync').disabled = syncLocal;
+    const info = syncLocal ? 'Buscando agora…'
+      : `Última busca ${relativo(S.sync.ultimaOk)}. Busca sozinho ao abrir o app (a cada 6 horas).` + (S.sync.erro ? ` Último erro: ${S.sync.erro}` : '');
     $('#info-sync').textContent = `Processos da OAB ${S.oab.numero}/${S.oab.uf} no Diário de Justiça Eletrônico. ${info}`;
     $('#info-sync-2').textContent = info;
     if (vista === 'quadro') renderQuadro();
@@ -297,7 +355,7 @@
   function renderEncontrados() {
     const el = $('#lista-encontrados');
     if (!S.encontrados.length) {
-      el.innerHTML = `<div class="vazio"><strong>Nada pendente</strong>${S.sync.rodando ? 'Buscando intimações…' : 'Quando surgir um processo novo na sua OAB, ele aparece aqui.'}</div>`;
+      el.innerHTML = `<div class="vazio"><strong>Nada pendente</strong>${syncLocal ? 'Buscando intimações…' : 'Quando surgir um processo novo na sua OAB, ele aparece aqui.'}</div>`;
       return;
     }
     el.innerHTML = S.encontrados.map((p) => {
@@ -415,11 +473,87 @@
       <label>Anotações<textarea name="notas" rows="4">${esc(c.notas || '')}</textarea></label>`;
   }
 
+  function ligarFoto(form) {
+    const inp = $('#foto-arquivo');
+    const status = $('#foto-status');
+    const botao = $('[data-foto]');
+    const preencher = (nome, valor, sobrescrever) => {
+      if (!valor || !form[nome]) return false;
+      if (form[nome].value && !sobrescrever) return false;
+      form[nome].value = nome === 'numero' ? cnj(valor) : valor;
+      return true;
+    };
+    const titulo = (s) => (s === s.toUpperCase() ? s.toLowerCase().replace(/(^|\s)(\S)/g, (m, a, b) => a + b.toUpperCase()) : s);
+    const chips = (partes) => {
+      const box = $('#foto-partes');
+      if (!partes.length) { box.innerHTML = ''; return; }
+      box.innerHTML = `<p class="sutil" style="font-size:.8rem;margin:4px 0 6px">Quem é o cliente? Toque para escolher:</p>
+        <div class="partes">${partes.map((p) => `<button type="button" class="parte" data-nome="${esc(p.nome)}">${esc(p.nome)} <small>${esc(p.polo || '')}</small></button>`).join('')}</div>`;
+      $$('.parte', box).forEach((b) => b.addEventListener('click', () => {
+        form.cliente.value = titulo(b.dataset.nome);
+        $$('.parte', box).forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      }));
+    };
+    botao.addEventListener('click', () => inp.click());
+    inp.addEventListener('change', async () => {
+      const arq = inp.files && inp.files[0];
+      inp.value = '';
+      if (!arq) return;
+      botao.disabled = true;
+      botao.classList.add('girando');
+      try {
+        if (!window.LeitorFoto) throw new Error('Leitor de foto indisponível.');
+        const { texto, campos: c } = await window.LeitorFoto.ler(arq, (msg) => { status.textContent = msg; });
+        $('#foto-texto').hidden = !texto.trim();
+        $('#foto-texto textarea').value = texto.trim();
+        const achados = [];
+        if (preencher('numero', c.numero, true)) achados.push('nº do processo');
+        if (preencher('orgao', c.orgao)) achados.push('vara');
+        if (preencher('classe', c.classe)) achados.push('classe');
+        if (c.valor && !form.notas.value) form.notas.value = `Valor da causa: ${c.valor}`;
+        let partes = [...c.ativo.map((n) => ({ nome: n, polo: 'polo ativo' })), ...c.passivo.map((n) => ({ nome: n, polo: 'polo passivo' }))];
+        // completa com o que a busca da OAB já sabe sobre esse processo
+        if (c.numero) {
+          const conhecido = await api('GET', `/api/processo/${dig(c.numero)}`).catch(() => null);
+          if (conhecido) {
+            if (preencher('orgao', conhecido.orgao)) achados.push('vara');
+            if (preencher('classe', conhecido.classe)) achados.push('classe');
+            const extras = (conhecido.partes || []).filter((p) => !p.advogada && p.nome !== 'SIGILO' && !partes.some((x) => x.nome === p.nome))
+              .map((p) => ({ nome: p.nome, polo: POLO[p.polo] || '' }));
+            partes = partes.concat(extras);
+            if (!form.cliente.value && conhecido.sugestaoCliente && conhecido.sugestaoCliente !== 'Processo em sigilo') form.cliente.value = titulo(conhecido.sugestaoCliente);
+            achados.push('dados da OAB');
+          }
+        }
+        if (!form.cliente.value && c.ativo[0]) form.cliente.value = titulo(c.ativo[0]);
+        if (partes.length) achados.push('partes');
+        chips(partes);
+        status.textContent = achados.length
+          ? `Encontrei: ${[...new Set(achados)].join(', ')}. Confira os campos antes de salvar.`
+          : 'Não consegui identificar os dados. Tente uma foto mais nítida, reta e bem iluminada, ou preencha à mão.';
+      } catch (e) {
+        status.textContent = e.message || 'Não foi possível ler a foto.';
+      } finally {
+        botao.disabled = false;
+        botao.classList.remove('girando');
+      }
+    });
+  }
+
   function abrirNovo() {
     $('#dlg-titulo').textContent = 'Novo processo';
-    $('#dlg-corpo').innerHTML = campos({ etapaId: vista === 'quadro' ? etapaAtiva : S.etapas[0].id });
+    $('#dlg-corpo').innerHTML = `
+      <div class="foto-caixa">
+        <button type="button" class="btn grande" data-foto>${ICON.camera}<span>Preencher por foto</span></button>
+        <input type="file" accept="image/*" id="foto-arquivo" hidden>
+        <p class="sutil" id="foto-status">Tire uma foto da capa ou da tela do processo. A leitura é feita no próprio aparelho.</p>
+        <div id="foto-partes"></div>
+        <details id="foto-texto" hidden><summary>Ver texto lido da foto</summary><textarea readonly rows="6" aria-label="Texto lido da foto"></textarea></details>
+      </div>
+      ${campos({ etapaId: vista === 'quadro' ? etapaAtiva : S.etapas[0].id })}`;
     $('#dlg-rodape').innerHTML = `<button type="button" class="btn fantasma" data-fechar>Cancelar</button><button type="submit" class="btn primario">Adicionar</button>`;
     const form = $('#form-cartao');
+    ligarFoto(form);
     form.onsubmit = async (ev) => {
       ev.preventDefault();
       const dados = Object.fromEntries(new FormData(form));
@@ -491,6 +625,6 @@
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   iniciar().catch(() => mostrarLogin());
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && S) api('GET', '/api/estado').then((n) => { S = n; render(); }).catch(() => {});
+    if (document.visibilityState === 'visible' && S) api('GET', '/api/estado').then((n) => { S = n; render(); if (syncVencida()) sincronizar(true); }).catch(() => {});
   });
 })();
