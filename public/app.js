@@ -510,6 +510,7 @@
         if (preencher('numero', c.numero, true)) achados.push('nº do processo');
         if (preencher('orgao', c.orgao)) achados.push('vara');
         if (preencher('classe', c.classe)) achados.push('classe');
+        if (preencher('telefone', c.telefone)) achados.push('telefone');
         if (c.valor && !form.notas.value) form.notas.value = `Valor da causa: ${c.valor}`;
         // a parte assistida é o cliente: tem prioridade sobre qualquer outro nome
         if (c.assistida[0]) { form.cliente.value = titulo(c.assistida[0]); achados.push('cliente (parte assistida)'); }
